@@ -74,7 +74,7 @@ make test
 | --- | --- | --- |
 | S0 | 工程骨架与本地环境 | ✅ |
 | S1 | 通信协议库（protocol / pb） | ✅ |
-| S2 | 存储层与中间件封装（mysqlx / redisx / kafkax） | ⬜ |
+| S2 | 存储层与中间件封装（mysqlx / redisx / kafkax） | ✅ |
 | S3+ | 各服务业务实现 | ⬜ |
 
 详细里程碑见 `docs/implementation-guide.md`。
