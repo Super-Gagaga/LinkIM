@@ -1,0 +1,12 @@
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+  except:
+    # Go 代码统一生成到 pkg/pb（go_package 指定），proto 不按包名分目录存放。
+    - PACKAGE_DIRECTORY_MATCH
+breaking:
+  use:
+    - FILE

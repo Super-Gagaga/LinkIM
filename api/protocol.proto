@@ -1,0 +1,95 @@
+// LinkIM 客户端-服务端通信协议消息定义（设计文档 4.4）。
+// 帧格式见 pkg/protocol；本文件的 message 作为帧 body 的 Protobuf 编码。
+syntax = "proto3";
+
+package linkim.pb.v1;
+
+option go_package = "github.com/linkim/linkim/pkg/pb";
+
+// ===== 消息收发 =====
+
+// MSG_SEND 请求体 (cmd=0x05)
+message MsgSendReq {
+  string client_msg_id = 1; // 客户端生成 UUID，用于幂等去重
+  string conv_id = 2;       // 会话 ID
+  int32 conv_type = 3;      // 1单聊 2群聊
+  int32 msg_type = 4;       // 1文本 2图片 3语音...
+  bytes payload = 5;        // 消息体
+}
+
+// MSG_SEND_ACK 响应体 (cmd=0x06)
+message MsgSendAck {
+  int32 code = 1;
+  string client_msg_id = 2; // 回带，客户端据此结束重发定时器
+  string msg_id = 3;        // 服务端全局唯一消息 ID（雪花）
+  int64 seq = 4;            // 会话内递增序列号
+  int64 timestamp = 5;
+}
+
+// MSG_PUSH 推送体 (cmd=0x07)
+message MsgPush {
+  string msg_id = 1;
+  string conv_id = 2;
+  int32 conv_type = 3;
+  int64 sender_id = 4;
+  int32 msg_type = 5;
+  bytes payload = 6;
+  int64 seq = 7;      // 接收方据此去重与排序
+  int64 timestamp = 8;
+}
+
+// MSG_RECEIVED_ACK 请求体 (cmd=0x08)：客户端已接收确认
+message ReceivedAckReq {
+  string msg_id = 1;
+  string conv_id = 2;
+  int64 seq = 3;
+}
+
+// ===== 连接与鉴权 =====
+
+// AUTH 请求体 (cmd=0x01)
+message AuthReq {
+  string token = 1;
+  string device_id = 2;
+  int32 platform = 3; // 1手机 2平板 3桌面 4Web（同端互踢按 platform 判定）
+}
+
+// AUTH_ACK 响应体 (cmd=0x02)
+message AuthAck {
+  int32 code = 1;
+  string msg = 2;
+  int64 uid = 3;
+  int32 kick_reason = 4; // 被踢下线原因（非 0 表示本连接被同端新登录顶替）
+}
+
+// HEARTBEAT 请求体 (cmd=0x03)：空消息
+message HeartbeatReq {}
+
+// KICK 推送体（服务端主动踢下线前下发）
+message KickReq {
+  string reason = 1;
+}
+
+// ===== 离线同步 =====
+
+// SYNC_PULL 请求体 (cmd=0x09)：携带本地最大 seq 增量拉取
+message SyncPullReq {
+  string conv_id = 1;
+  int64 local_max_seq = 2;
+  int32 limit = 3;
+}
+
+// SYNC_RESP 响应体 (cmd=0x0A)
+message SyncResp {
+  string conv_id = 1;
+  repeated MsgPush messages = 2;
+  int64 max_seq = 3; // 会话当前最新 seq，客户端据此判断是否追平
+}
+
+// ===== 撤回 =====
+
+// RECALL 请求体 (cmd=0x0B)
+message MsgRecallReq {
+  string conv_id = 1;
+  string msg_id = 2;
+}

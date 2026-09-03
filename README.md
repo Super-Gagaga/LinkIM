@@ -25,7 +25,7 @@ LinkIM 是一个参考企业级架构设计的分布式 IM（即时通讯）系�
 ## 目录结构
 
 ```
-├── api/              # Protobuf / HTTP 接口定义（待补充）
+├── api/              # Protobuf 协议定义（protocol.proto）与 buf 代码生成配置
 ├── cmd/              # 各服务启动入口（account / logic / comet / job）
 ├── configs/          # 各服务 YAML 配置（支持 LINKIM_ 前缀环境变量覆盖）
 ├── deployments/      # docker-compose：本地依赖环境（MySQL/Redis/Kafka + topic 初始化）
@@ -73,7 +73,7 @@ make test
 | 步骤 | 主题 | 状态 |
 | --- | --- | --- |
 | S0 | 工程骨架与本地环境 | ✅ |
-| S1 | 通信协议库（protocol / pb） | ⬜ |
+| S1 | 通信协议库（protocol / pb） | ✅ |
 | S2 | 存储层与中间件封装（mysqlx / redisx / kafkax） | ⬜ |
 | S3+ | 各服务业务实现 | ⬜ |
 

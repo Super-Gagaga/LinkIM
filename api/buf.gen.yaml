@@ -1,0 +1,7 @@
+# buf generate 配置：在 api/ 目录执行 buf generate，
+# 生成的 Go 代码落到 ../pkg/pb（与 .proto 同名、source_relative 布局）。
+version: v2
+plugins:
+  - local: protoc-gen-go
+    out: ../pkg/pb
+    opt: paths=source_relative
