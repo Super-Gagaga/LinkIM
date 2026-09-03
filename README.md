@@ -50,7 +50,10 @@ make build
 # 3. 运行单元测试（含 race 检测）
 make test
 
-# 4. 启动单个服务（示例：account）
+# 4. 运行集成测试（连接 docker 依赖，需先 make compose-up && make migrate-up）
+make test-int
+
+# 5. 启动单个服务（示例：account）
 ./bin/account.exe -conf configs/account.yaml
 ```
 
@@ -75,6 +78,7 @@ make test
 | S0 | 工程骨架与本地环境 | ✅ |
 | S1 | 通信协议库（protocol / pb） | ✅ |
 | S2 | 存储层与中间件封装（mysqlx / redisx / kafkax） | ✅ |
-| S3+ | 各服务业务实现 | ⬜ |
+| S3 | Account 账号服务（HTTP + JWT） | ✅ |
+| S4+ | Logic / Comet / Job 等服务实现 | ⬜ |
 
 详细里程碑见 `docs/implementation-guide.md`。

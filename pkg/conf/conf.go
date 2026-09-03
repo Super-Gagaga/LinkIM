@@ -17,6 +17,7 @@ type ServerConfig struct {
 	HTTPPort int    `mapstructure:"http_port"`
 	GRPCPort int    `mapstructure:"grpc_port"`
 	WSPort   int    `mapstructure:"ws_port"`
+	NodeID   int64  `mapstructure:"node_id"` // snowflake 节点 ID，集群内唯一
 }
 
 // MySQLConfig 定义 MySQL DSN 与连接池调优参数。
@@ -47,6 +48,13 @@ type LogConfig struct {
 	Format string `mapstructure:"format"`
 }
 
+// JWTConfig 定义 token 签名密钥与有效期（设计文档 5.2：access 2h + refresh 30d）。
+type JWTConfig struct {
+	Secret     string        `mapstructure:"secret"`
+	AccessTTL  time.Duration `mapstructure:"access_ttl"`
+	RefreshTTL time.Duration `mapstructure:"refresh_ttl"`
+}
+
 // Config 是单个 LinkIM 服务的完整配置。
 type Config struct {
 	Server ServerConfig `mapstructure:"server"`
@@ -54,6 +62,7 @@ type Config struct {
 	Redis  RedisConfig  `mapstructure:"redis"`
 	Kafka  KafkaConfig  `mapstructure:"kafka"`
 	Log    LogConfig    `mapstructure:"log"`
+	JWT    JWTConfig    `mapstructure:"jwt"`
 }
 
 // EnvPrefix 是用于覆盖文件配置值的环境变量前缀，
@@ -94,6 +103,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.http_port", 0)
 	v.SetDefault("server.grpc_port", 0)
 	v.SetDefault("server.ws_port", 0)
+	v.SetDefault("server.node_id", 0)
 
 	v.SetDefault("mysql.dsn", "")
 	v.SetDefault("mysql.max_open_conns", 64)
@@ -109,4 +119,8 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "console")
+
+	v.SetDefault("jwt.secret", "")
+	v.SetDefault("jwt.access_ttl", 2*time.Hour)
+	v.SetDefault("jwt.refresh_ttl", 720*time.Hour)
 }

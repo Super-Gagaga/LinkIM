@@ -2,6 +2,7 @@
 server:
   name: account
   http_port: 8080
+  node_id: 1 # snowflake 节点 ID（uid 分配），多实例时必须互异
 
 mysql:
   dsn: "root:linkim123@tcp(127.0.0.1:3307)/linkim?charset=utf8mb4&parseTime=true&loc=Local"
@@ -22,3 +23,8 @@ kafka:
 log:
   level: debug
   format: console
+
+jwt:
+  secret: "linkim-dev-secret-change-me" # 生产环境必须从环境变量注入
+  access_ttl: 2h
+  refresh_ttl: 720h # 30d

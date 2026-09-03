@@ -23,6 +23,9 @@ build: ## 编译四个服务二进制到 bin/
 test: ## 运行全部单元测试（含 race 检测）
 	$(GO) test ./... -race -count=1
 
+test-int: ## 运行集成测试（需先 compose-up + migrate-up，连 docker 依赖）
+	$(GO) test -tags integration ./internal/account/ -race -count=1 -v
+
 lint: ## 运行 golangci-lint 静态检查
 	golangci-lint run
 

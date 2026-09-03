@@ -840,7 +840,7 @@ go test ./internal/logic/ 通过（token 缓存逻辑用 miniredis 或 mock 测�
 | S0  | 工程骨架与本地环境      | ☑   |        |
 | S1  | 通信协议库          | ☑   |        |
 | S2  | 存储层与中间件封装      | ☑   |        |
-| S3  | Account 账号服务   | ☐   |        |
+| S3  | Account 账号服务   | ☑   |        |
 | S4  | Logic 骨架与鉴权    | ☐   |        |
 | S5  | Comet 长连接接入层   | ☐   |        |
 | S6  | 单聊上行链路         | ☐   |        |
