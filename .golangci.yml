@@ -1,0 +1,17 @@
+# golangci-lint v2 配置。
+# default=standard 已含 errcheck / govet / ineffassign / staticcheck / unused，
+# 按实施指南 S0 要求额外启用 revive。
+version: "2"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+linters:
+  default: standard
+  enable:
+    - revive
+  settings:
+    revive:
+      severity: warning

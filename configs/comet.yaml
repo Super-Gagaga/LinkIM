@@ -1,0 +1,25 @@
+# LinkIM comet gateway (WebSocket :8081, gRPC :9000)
+server:
+  name: comet
+  ws_port: 8081
+  grpc_port: 9000
+
+mysql:
+  dsn: ""
+  max_open_conns: 16
+  max_idle_conns: 8
+  conn_max_lifetime: 5m
+
+redis:
+  addr: "127.0.0.1:16379"
+  password: ""
+  db: 0
+
+kafka:
+  brokers:
+    - "127.0.0.1:9092"
+  client_id: "comet"
+
+log:
+  level: debug
+  format: console

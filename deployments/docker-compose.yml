@@ -1,0 +1,98 @@
+# LinkIM 本地依赖环境：MySQL 8 / Redis 7 / Kafka 3.7 (KRaft 单节点) + topic 初始化。
+# 用法：make compose-up（等价 docker compose -f deployments/docker-compose.yml up -d --wait）
+# 说明：单机部署 replication-factor 降为 1；生产按设计文档 8.1 使用 3 副本。
+
+services:
+  mysql:
+    image: mysql:8
+    container_name: linkim-mysql
+    # 宿主机 3306 已被本机 MySQL 服务占用，发布到 3307（容器内仍为 3306）。
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: linkim123
+      MYSQL_DATABASE: linkim
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -plinkim123 --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 15s
+
+  redis:
+    image: redis:7
+    container_name: linkim-redis
+    # 宿主机 6379 落在 Hyper-V/WinNAT 动态端口保留区间内，发布到 16379（容器内仍为 6379）。
+    ports:
+      - "16379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: linkim-kafka
+    hostname: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      # KRaft 单节点：同一进程同时充当 broker 与 controller。
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      # 双监听：容器间走 INTERNAL(kafka:29092)，宿主机上的 Go 服务走 EXTERNAL(localhost:9092)。
+      KAFKA_LISTENERS: INTERNAL://kafka:29092,CONTROLLER://kafka:29093,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # 单节点下内部 topic 副本数必须为 1。
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+
+  # 一次性容器：等 kafka 健康后按设计文档 8.1 创建全部 topic（幂等，可重复执行）。
+  kafka-init:
+    image: apache/kafka:3.7.0
+    container_name: linkim-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        BS="kafka:29092"
+        # topic:分区数（副本数单机为 1，生产环境为 3）
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic msg.push     --partitions 64  --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic msg.store    --partitions 128 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic msg.notify   --partitions 8   --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic presence     --partitions 8   --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic dlq.msg.push --partitions 4   --replication-factor 1
+        echo "all topics created:"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --list
+
+volumes:
+  mysql-data:
+  redis-data:
+  kafka-data:

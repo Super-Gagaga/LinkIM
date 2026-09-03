@@ -1,0 +1,24 @@
+# LinkIM logic service (gRPC :9001)
+server:
+  name: logic
+  grpc_port: 9001
+
+mysql:
+  dsn: "root:linkim123@tcp(127.0.0.1:3307)/linkim?charset=utf8mb4&parseTime=true&loc=Local"
+  max_open_conns: 64
+  max_idle_conns: 16
+  conn_max_lifetime: 5m
+
+redis:
+  addr: "127.0.0.1:16379"
+  password: ""
+  db: 0
+
+kafka:
+  brokers:
+    - "127.0.0.1:9092"
+  client_id: "logic"
+
+log:
+  level: debug
+  format: console
