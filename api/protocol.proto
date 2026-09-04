@@ -77,6 +77,7 @@ message SyncPullReq {
   string conv_id = 1;
   int64 local_max_seq = 2;
   int32 limit = 3;
+  int64 uid = 4; // 服务端路由用：comet 回填连接归属 uid，客户端不填写
 }
 
 // SYNC_RESP 响应体 (cmd=0x0A)

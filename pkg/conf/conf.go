@@ -55,14 +55,21 @@ type JWTConfig struct {
 	RefreshTTL time.Duration `mapstructure:"refresh_ttl"`
 }
 
+// AccountConfig 定义上游账号服务地址（logic 调用 /internal/v1/verify）。
+type AccountConfig struct {
+	Addr          string        `mapstructure:"addr"`
+	VerifyTimeout time.Duration `mapstructure:"verify_timeout"`
+}
+
 // Config 是单个 LinkIM 服务的完整配置。
 type Config struct {
-	Server ServerConfig `mapstructure:"server"`
-	MySQL  MySQLConfig  `mapstructure:"mysql"`
-	Redis  RedisConfig  `mapstructure:"redis"`
-	Kafka  KafkaConfig  `mapstructure:"kafka"`
-	Log    LogConfig    `mapstructure:"log"`
-	JWT    JWTConfig    `mapstructure:"jwt"`
+	Server  ServerConfig  `mapstructure:"server"`
+	MySQL   MySQLConfig   `mapstructure:"mysql"`
+	Redis   RedisConfig   `mapstructure:"redis"`
+	Kafka   KafkaConfig   `mapstructure:"kafka"`
+	Log     LogConfig     `mapstructure:"log"`
+	JWT     JWTConfig     `mapstructure:"jwt"`
+	Account AccountConfig `mapstructure:"account"`
 }
 
 // EnvPrefix 是用于覆盖文件配置值的环境变量前缀，
@@ -123,4 +130,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("jwt.secret", "")
 	v.SetDefault("jwt.access_ttl", 2*time.Hour)
 	v.SetDefault("jwt.refresh_ttl", 720*time.Hour)
+
+	v.SetDefault("account.addr", "http://127.0.0.1:8080")
+	v.SetDefault("account.verify_timeout", time.Second)
 }

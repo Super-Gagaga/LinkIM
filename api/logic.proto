@@ -1,0 +1,90 @@
+// LinkIM Logic 服务 gRPC 契约（设计文档 2.2、5.2）。
+// Comet 与 Job 通过本接口调用逻辑层；S4 仅实现 VerifyToken，其余占位。
+syntax = "proto3";
+
+package linkim.logic.v1;
+
+option go_package = "github.com/linkim/linkim/pkg/pb";
+
+import "protocol.proto";
+
+service Logic {
+  // Comet AUTH 时调用：校验 token（Redis 缓存 5min，miss 回源 account）。
+  rpc VerifyToken(VerifyTokenReq) returns (VerifyTokenResp);
+
+  // S6 实现：单聊/群聊上行消息处理（幂等/seq/msgId/写 Kafka）。
+  rpc SendMsg(SendMsgReq) returns (SendMsgAck);
+
+  // S8 实现：按会话 seq 增量拉取离线消息。
+  // 复用客户端协议的 linkim.pb.v1.SyncPullReq（含 comet 回填的 uid 字段），
+  // 避免与 pkg/pb 中同名消息冲突；comet 解帧后可直接透传。
+  rpc SyncPull(linkim.pb.v1.SyncPullReq) returns (SyncPullResp);
+
+  // S7 实现：接收端已投递回执（观测用）。
+  rpc ReportDelivered(ReportDeliveredReq) returns (Empty);
+
+  // 上下线事件（Comet AUTH 成功/断连时上报）。
+  rpc OnlineEvent(OnlineEventReq) returns (Empty);
+}
+
+message VerifyTokenReq {
+  int64 uid = 1;
+  string token = 2;
+}
+
+message VerifyTokenResp {
+  bool valid = 1;
+  int32 code = 2; // 0 有效；40101 无效；50102 account 不可达
+}
+
+message SendMsgReq {
+  int64 sender_id = 1;
+  string conv_id = 2;
+  int32 conv_type = 3; // 1单聊 2群聊
+  string client_msg_id = 4; // 幂等键
+  string device_id = 5;
+  int32 msg_type = 6;
+  bytes payload = 7;
+}
+
+message SendMsgAck {
+  int32 code = 1;
+  string msg_id = 2;
+  int64 seq = 3;
+  int64 timestamp = 4;
+}
+
+message SyncPullResp {
+  int32 code = 1;
+  repeated PbMsg messages = 2;
+  int64 max_seq = 3;
+}
+
+// PbMsg 是跨服务传递的消息统一结构（Kafka msg.push/msg.store 的 value）。
+message PbMsg {
+  string msg_id = 1;
+  string conv_id = 2;
+  int32 conv_type = 3;
+  int64 sender_id = 4;
+  int32 msg_type = 5;
+  bytes payload = 6;
+  int64 seq = 7;
+  int64 timestamp = 8;
+  int32 status = 9; // 0正常 1已撤回
+}
+
+message ReportDeliveredReq {
+  int64 uid = 1;
+  string msg_id = 2;
+  string conv_id = 3;
+}
+
+message OnlineEventReq {
+  int64 uid = 1;
+  string device_id = 2;
+  int32 platform = 3;
+  string comet_addr = 4;
+  bool online = 5;
+}
+
+message Empty {}

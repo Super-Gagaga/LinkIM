@@ -41,7 +41,7 @@ LinkIM 是一个参考企业级架构设计的分布式 IM（即时通讯）系�
 环境要求：Go ≥ 1.22、Docker、golangci-lint、golang-migrate（后续迁移用）。
 
 ```bash
-# 1. 启动本地依赖（MySQL :3307 / Redis :16379 / Kafka :9092，含 topic 初始化）
+# 1. 启动本地依赖（MySQL :23306 / Redis :16379 / Kafka :9092，含 topic 初始化）
 make compose-up
 
 # 2. 编译四个服务到 bin/
@@ -57,7 +57,7 @@ make test-int
 ./bin/account.exe -conf configs/account.yaml
 ```
 
-> 端口说明：本机 3306/6379 已被占用，compose 将 MySQL 映射到 3307、Redis 映射到 16379（容器内仍为默认端口）。
+> 端口说明：本机 3306/3307/6379 已被占用，compose 将 MySQL 映射到 23306、Redis 映射到 16379（容器内仍为默认端口）。
 
 ## 配置说明
 
@@ -79,6 +79,7 @@ make test-int
 | S1 | 通信协议库（protocol / pb） | ✅ |
 | S2 | 存储层与中间件封装（mysqlx / redisx / kafkax） | ✅ |
 | S3 | Account 账号服务（HTTP + JWT） | ✅ |
-| S4+ | Logic / Comet / Job 等服务实现 | ⬜ |
+| S4 | Logic 骨架与鉴权（gRPC） | ✅ |
+| S5+ | Comet / Job 等服务实现 | ⬜ |
 
 详细里程碑见 `docs/implementation-guide.md`。

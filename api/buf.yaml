@@ -7,6 +7,14 @@ lint:
   except:
     # Go 代码统一生成到 pkg/pb（go_package 指定），proto 不按包名分目录存放。
     - PACKAGE_DIRECTORY_MATCH
+    # protocol.proto 与 logic.proto 按服务分文件，同存于 api/ 目录。
+    - DIRECTORY_SAME_PACKAGE
+    # 消息/服务命名遵循实施指南约定（VerifyTokenReq、Logic 等），
+    # 不采用 buf 的 Request/Response 后缀风格。
+    - SERVICE_SUFFIX
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
 breaking:
   use:
     - FILE

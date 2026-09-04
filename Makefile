@@ -6,7 +6,7 @@ BIN_DIR := bin
 COMPOSE_FILE := deployments/docker-compose.yml
 
 # golang-migrate 的 MySQL DSN（S2 起使用；multiStatements 支持多语句迁移脚本）
-MYSQL_DSN ?= mysql://root:linkim123@tcp(127.0.0.1:3307)/linkim?multiStatements=true
+MYSQL_DSN ?= mysql://root:linkim123@tcp(127.0.0.1:23306)/linkim?multiStatements=true
 
 .PHONY: help build test lint proto migrate-up migrate-down compose-up compose-down clean
 
@@ -35,10 +35,12 @@ proto: ## 由 api/*.proto 生成 pkg/pb Go 代码（优先 buf，未安装则回
 		cd api && buf generate; \
 	else \
 		echo ">> buf 未安装，回退 protoc"; \
-		protoc -I api --go_out=pkg/pb --go_opt=paths=source_relative api/protocol.proto; \
+		protoc -I api --go_out=pkg/pb --go_opt=paths=source_relative \
+			--go-grpc_out=pkg/pb --go-grpc_opt=paths=source_relative \
+			api/protocol.proto api/logic.proto; \
 	fi
 	@echo "等价 protoc 命令（buf 不可用时手动执行）:"
-	@echo "  protoc -I api --go_out=pkg/pb --go_opt=paths=source_relative api/protocol.proto"
+	@echo "  protoc -I api --go_out=pkg/pb --go_opt=paths=source_relative --go-grpc_out=pkg/pb --go-grpc_opt=paths=source_relative api/protocol.proto api/logic.proto"
 
 migrate-up: ## 应用全部数据库迁移（迁移文件自 S2 提供）
 	migrate -path migrations -database "$(MYSQL_DSN)" up

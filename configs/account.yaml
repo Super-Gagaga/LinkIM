@@ -5,7 +5,7 @@ server:
   node_id: 1 # snowflake 节点 ID（uid 分配），多实例时必须互异
 
 mysql:
-  dsn: "root:linkim123@tcp(127.0.0.1:3307)/linkim?charset=utf8mb4&parseTime=true&loc=Local"
+  dsn: "root:linkim123@tcp(127.0.0.1:23306)/linkim?charset=utf8mb4&parseTime=true&loc=Local"
   max_open_conns: 64
   max_idle_conns: 16
   conn_max_lifetime: 5m

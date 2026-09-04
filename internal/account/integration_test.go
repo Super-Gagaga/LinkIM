@@ -1,6 +1,6 @@
 //go:build integration
 
-// 集成测试：连接 docker 依赖（MySQL 3307 / Redis 16379），
+// 集成测试：连接 docker 依赖（MySQL 23306 / Redis 16379），
 // 覆盖注册 → 登录 → verify → 登出 → verify 失效 全链路。
 // 运行：make test-int（依赖 make compose-up && make migrate-up）。
 package account
@@ -31,7 +31,7 @@ func newIntegrationServer(t *testing.T) (*httptest.Server, *Service) {
 	t.Helper()
 
 	db, err := mysqlx.New(conf.MySQLConfig{
-		DSN:             "root:linkim123@tcp(127.0.0.1:3307)/linkim?charset=utf8mb4&parseTime=true&loc=Local",
+		DSN:             "root:linkim123@tcp(127.0.0.1:23306)/linkim?charset=utf8mb4&parseTime=true&loc=Local",
 		MaxOpenConns:    4,
 		MaxIdleConns:    2,
 		ConnMaxLifetime: time.Minute,

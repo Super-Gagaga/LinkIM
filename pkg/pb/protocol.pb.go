@@ -558,6 +558,7 @@ type SyncPullReq struct {
 	ConvId        string                 `protobuf:"bytes,1,opt,name=conv_id,json=convId,proto3" json:"conv_id,omitempty"`
 	LocalMaxSeq   int64                  `protobuf:"varint,2,opt,name=local_max_seq,json=localMaxSeq,proto3" json:"local_max_seq,omitempty"`
 	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Uid           int64                  `protobuf:"varint,4,opt,name=uid,proto3" json:"uid,omitempty"` // 服务端路由用：comet 回填连接归属 uid，客户端不填写
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -609,6 +610,13 @@ func (x *SyncPullReq) GetLocalMaxSeq() int64 {
 func (x *SyncPullReq) GetLimit() int32 {
 	if x != nil {
 		return x.Limit
+	}
+	return 0
+}
+
+func (x *SyncPullReq) GetUid() int64 {
+	if x != nil {
+		return x.Uid
 	}
 	return 0
 }
@@ -771,11 +779,12 @@ const file_protocol_proto_rawDesc = "" +
 	"kickReason\"\x0e\n" +
 	"\fHeartbeatReq\"!\n" +
 	"\aKickReq\x12\x16\n" +
-	"\x06reason\x18\x01 \x01(\tR\x06reason\"`\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\"r\n" +
 	"\vSyncPullReq\x12\x17\n" +
 	"\aconv_id\x18\x01 \x01(\tR\x06convId\x12\"\n" +
 	"\rlocal_max_seq\x18\x02 \x01(\x03R\vlocalMaxSeq\x12\x14\n" +
-	"\x05limit\x18\x03 \x01(\x05R\x05limit\"o\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x10\n" +
+	"\x03uid\x18\x04 \x01(\x03R\x03uid\"o\n" +
 	"\bSyncResp\x12\x17\n" +
 	"\aconv_id\x18\x01 \x01(\tR\x06convId\x121\n" +
 	"\bmessages\x18\x02 \x03(\v2\x15.linkim.pb.v1.MsgPushR\bmessages\x12\x17\n" +
