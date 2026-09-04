@@ -1,0 +1,35 @@
+// LinkIM Comet 接入层 gRPC 契约（Job/Logic → Comet 下行投递）。
+// 命名说明：KickConnReq/KickConnResp 而非 KickReq/Empty，
+// 因客户端协议 protocol.proto 已定义 KickReq、logic.proto 已定义 Empty，
+// 两者生成到同一 Go 包 pkg/pb 不能重名。
+syntax = "proto3";
+
+package linkim.comet.v1;
+
+option go_package = "github.com/linkim/linkim/pkg/pb";
+
+service Comet {
+  // Job 下行批量推帧：按 (uid, device_id) 定位连接写入 send 通道。
+  rpc PushFrames(PushFramesReq) returns (PushFramesResp);
+
+  // 踢下线（同端互踢 / 管理操作）：向连接写 Kick 帧后断开。
+  rpc Kick(KickConnReq) returns (KickConnResp);
+}
+
+message PushFramesReq {
+  int64 uid = 1;
+  string device_id = 2;
+  repeated bytes frames = 3; // 已编码完整的 LinkIM 帧
+}
+
+message PushFramesResp {
+  bool online = 1; // 目标连接是否在本机在线
+}
+
+message KickConnReq {
+  int64 uid = 1;
+  string device_id = 2;
+  string reason = 3;
+}
+
+message KickConnResp {}

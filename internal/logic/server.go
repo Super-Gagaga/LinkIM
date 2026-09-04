@@ -32,8 +32,8 @@ func (s *Server) VerifyToken(ctx context.Context, req *pb.VerifyTokenReq) (*pb.V
 	if req.GetToken() == "" {
 		return &pb.VerifyTokenResp{Valid: false, Code: CodeInvalidTok}, nil
 	}
-	valid, code := s.verifyTokenFlow(ctx, req.GetUid(), req.GetToken())
-	return &pb.VerifyTokenResp{Valid: valid, Code: code}, nil
+	uid, valid, code := s.verifyTokenFlow(ctx, req.GetUid(), req.GetToken())
+	return &pb.VerifyTokenResp{Valid: valid, Code: code, Uid: uid}, nil
 }
 
 // redisCache 是 Cache 的 go-redis 实现。

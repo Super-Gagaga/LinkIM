@@ -346,6 +346,7 @@ type AuthReq struct {
 	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
 	DeviceId      string                 `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
 	Platform      int32                  `protobuf:"varint,3,opt,name=platform,proto3" json:"platform,omitempty"` // 1手机 2平板 3桌面 4Web（同端互踢按 platform 判定）
+	Uid           int64                  `protobuf:"varint,4,opt,name=uid,proto3" json:"uid,omitempty"`           // 登录接口返回的 uid；服务端校验与 token 一致性后使用
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -397,6 +398,13 @@ func (x *AuthReq) GetDeviceId() string {
 func (x *AuthReq) GetPlatform() int32 {
 	if x != nil {
 		return x.Platform
+	}
+	return 0
+}
+
+func (x *AuthReq) GetUid() int64 {
+	if x != nil {
+		return x.Uid
 	}
 	return 0
 }
@@ -627,6 +635,7 @@ type SyncResp struct {
 	ConvId        string                 `protobuf:"bytes,1,opt,name=conv_id,json=convId,proto3" json:"conv_id,omitempty"`
 	Messages      []*MsgPush             `protobuf:"bytes,2,rep,name=messages,proto3" json:"messages,omitempty"`
 	MaxSeq        int64                  `protobuf:"varint,3,opt,name=max_seq,json=maxSeq,proto3" json:"max_seq,omitempty"` // 会话当前最新 seq，客户端据此判断是否追平
+	Code          int32                  `protobuf:"varint,4,opt,name=code,proto3" json:"code,omitempty"`                   // 业务码：0 成功；非 0 时 messages 为空
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -678,6 +687,13 @@ func (x *SyncResp) GetMessages() []*MsgPush {
 func (x *SyncResp) GetMaxSeq() int64 {
 	if x != nil {
 		return x.MaxSeq
+	}
+	return 0
+}
+
+func (x *SyncResp) GetCode() int32 {
+	if x != nil {
+		return x.Code
 	}
 	return 0
 }
@@ -766,11 +782,12 @@ const file_protocol_proto_rawDesc = "" +
 	"\x0eReceivedAckReq\x12\x15\n" +
 	"\x06msg_id\x18\x01 \x01(\tR\x05msgId\x12\x17\n" +
 	"\aconv_id\x18\x02 \x01(\tR\x06convId\x12\x10\n" +
-	"\x03seq\x18\x03 \x01(\x03R\x03seq\"X\n" +
+	"\x03seq\x18\x03 \x01(\x03R\x03seq\"j\n" +
 	"\aAuthReq\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1b\n" +
 	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\x12\x1a\n" +
-	"\bplatform\x18\x03 \x01(\x05R\bplatform\"b\n" +
+	"\bplatform\x18\x03 \x01(\x05R\bplatform\x12\x10\n" +
+	"\x03uid\x18\x04 \x01(\x03R\x03uid\"b\n" +
 	"\aAuthAck\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x10\n" +
 	"\x03msg\x18\x02 \x01(\tR\x03msg\x12\x10\n" +
@@ -784,11 +801,12 @@ const file_protocol_proto_rawDesc = "" +
 	"\aconv_id\x18\x01 \x01(\tR\x06convId\x12\"\n" +
 	"\rlocal_max_seq\x18\x02 \x01(\x03R\vlocalMaxSeq\x12\x14\n" +
 	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x10\n" +
-	"\x03uid\x18\x04 \x01(\x03R\x03uid\"o\n" +
+	"\x03uid\x18\x04 \x01(\x03R\x03uid\"\x83\x01\n" +
 	"\bSyncResp\x12\x17\n" +
 	"\aconv_id\x18\x01 \x01(\tR\x06convId\x121\n" +
 	"\bmessages\x18\x02 \x03(\v2\x15.linkim.pb.v1.MsgPushR\bmessages\x12\x17\n" +
-	"\amax_seq\x18\x03 \x01(\x03R\x06maxSeq\">\n" +
+	"\amax_seq\x18\x03 \x01(\x03R\x06maxSeq\x12\x12\n" +
+	"\x04code\x18\x04 \x01(\x05R\x04code\">\n" +
 	"\fMsgRecallReq\x12\x17\n" +
 	"\aconv_id\x18\x01 \x01(\tR\x06convId\x12\x15\n" +
 	"\x06msg_id\x18\x02 \x01(\tR\x05msgIdB!Z\x1fgithub.com/linkim/linkim/pkg/pbb\x06proto3"

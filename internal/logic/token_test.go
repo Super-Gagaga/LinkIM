@@ -44,19 +44,20 @@ func (c *memCache) Set(_ context.Context, key, val string, _ time.Duration) erro
 	return nil
 }
 
-// stubVerifier 是 Verifier 的可编程 stub。
+// stubVerifier 是 Verifier 的可编程 stub（uid 为回源返回的归属 uid）。
 type stubVerifier struct {
 	mu    sync.Mutex
+	uid   int64
 	valid bool
 	err   error
 	calls int
 }
 
-func (v *stubVerifier) Verify(_ context.Context, _ int64, _ string) (bool, error) {
+func (v *stubVerifier) Verify(_ context.Context, _ int64, _ string) (int64, bool, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.calls++
-	return v.valid, v.err
+	return v.uid, v.valid, v.err
 }
 
 func (v *stubVerifier) callCount() int {
@@ -84,40 +85,66 @@ func TestTokenCacheKey(t *testing.T) {
 	assert.Len(t, parts[2], 32)
 }
 
-// TestVerifyTokenFlow 覆盖缓存命中/回源/回填/不可达/降级。
+// TestVerifyTokenFlow 覆盖缓存命中/回源/回填/不可达/降级/uid 一致性。
 func TestVerifyTokenFlow(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("cache miss falls through to account and backfills", func(t *testing.T) {
 		cache := newMemCache()
-		verifier := &stubVerifier{valid: true}
+		verifier := &stubVerifier{uid: 7, valid: true}
 		svc := newTestServer(cache, verifier)
 
-		valid, code := svc.verifyTokenFlow(ctx, 7, "tok")
+		uid, valid, code := svc.verifyTokenFlow(ctx, 7, "tok")
+		assert.Equal(t, int64(7), uid)
 		assert.True(t, valid)
 		assert.Equal(t, int32(CodeOK), code)
 		assert.Equal(t, 1, verifier.callCount())
 		assert.Equal(t, "1", cache.kv[TokenCacheKey(7, "tok")])
 
 		// 第二次命中缓存，不再回源。
-		valid, code = svc.verifyTokenFlow(ctx, 7, "tok")
+		_, valid, code = svc.verifyTokenFlow(ctx, 7, "tok")
 		assert.True(t, valid)
 		assert.Equal(t, int32(CodeOK), code)
 		assert.Equal(t, 1, verifier.callCount())
 	})
 
-	t.Run("invalid token cached as 0", func(t *testing.T) {
+	t.Run("uid zero is resolved from account", func(t *testing.T) {
 		cache := newMemCache()
-		verifier := &stubVerifier{valid: false}
+		verifier := &stubVerifier{uid: 42, valid: true}
 		svc := newTestServer(cache, verifier)
 
-		valid, code := svc.verifyTokenFlow(ctx, 7, "bad")
+		// 调用方未声明 uid（comet 场景），回源解析出真实 uid。
+		// 缓存 key 退化为 uid=0 前缀，comet 后续重连会再次回源。
+		uid, valid, code := svc.verifyTokenFlow(ctx, 0, "tok")
+		assert.Equal(t, int64(42), uid)
+		assert.True(t, valid)
+		assert.Equal(t, int32(CodeOK), code)
+	})
+
+	t.Run("declared uid mismatching token owner is rejected", func(t *testing.T) {
+		cache := newMemCache()
+		verifier := &stubVerifier{uid: 42, valid: true}
+		svc := newTestServer(cache, verifier)
+
+		_, valid, code := svc.verifyTokenFlow(ctx, 7, "tok")
+		assert.False(t, valid)
+		assert.Equal(t, int32(CodeInvalidTok), code)
+		// 不一致按无效缓存，防止枚举探测。
+		assert.Equal(t, "0", cache.kv[TokenCacheKey(7, "tok")])
+	})
+
+	t.Run("invalid token cached as 0", func(t *testing.T) {
+		cache := newMemCache()
+		verifier := &stubVerifier{uid: 7, valid: false}
+		svc := newTestServer(cache, verifier)
+
+		_, valid, code := svc.verifyTokenFlow(ctx, 7, "bad")
 		assert.False(t, valid)
 		assert.Equal(t, int32(CodeInvalidTok), code)
 		assert.Equal(t, "0", cache.kv[TokenCacheKey(7, "bad")])
 
 		// 命中负缓存。
-		_, code = svc.verifyTokenFlow(ctx, 7, "bad")
+		_, _, code = svc.verifyTokenFlow(ctx, 7, "bad")
 		assert.Equal(t, int32(CodeInvalidTok), code)
 		assert.Equal(t, 1, verifier.callCount())
 	})
@@ -127,7 +154,7 @@ func TestVerifyTokenFlow(t *testing.T) {
 		verifier := &stubVerifier{err: errors.New("dial tcp: refused")}
 		svc := newTestServer(cache, verifier)
 
-		valid, code := svc.verifyTokenFlow(ctx, 7, "tok")
+		_, valid, code := svc.verifyTokenFlow(ctx, 7, "tok")
 		assert.False(t, valid)
 		assert.Equal(t, int32(CodeAccountDown), code)
 		assert.Empty(t, cache.kv, "不可达不应写缓存")
@@ -136,8 +163,9 @@ func TestVerifyTokenFlow(t *testing.T) {
 		verifier.mu.Lock()
 		verifier.err = nil
 		verifier.valid = true
+		verifier.uid = 7
 		verifier.mu.Unlock()
-		valid, code = svc.verifyTokenFlow(ctx, 7, "tok")
+		_, valid, code = svc.verifyTokenFlow(ctx, 7, "tok")
 		assert.True(t, valid)
 		assert.Equal(t, int32(CodeOK), code)
 	})
@@ -145,10 +173,10 @@ func TestVerifyTokenFlow(t *testing.T) {
 	t.Run("redis read error degrades to account", func(t *testing.T) {
 		cache := newMemCache()
 		cache.getErr = errors.New("redis down")
-		verifier := &stubVerifier{valid: true}
+		verifier := &stubVerifier{uid: 7, valid: true}
 		svc := newTestServer(cache, verifier)
 
-		valid, code := svc.verifyTokenFlow(ctx, 7, "tok")
+		_, valid, code := svc.verifyTokenFlow(ctx, 7, "tok")
 		assert.True(t, valid)
 		assert.Equal(t, int32(CodeOK), code)
 		assert.Equal(t, 1, verifier.callCount())
@@ -156,11 +184,11 @@ func TestVerifyTokenFlow(t *testing.T) {
 
 	t.Run("different uid does not share cache", func(t *testing.T) {
 		cache := newMemCache()
-		verifier := &stubVerifier{valid: true}
+		verifier := &stubVerifier{uid: 7, valid: true}
 		svc := newTestServer(cache, verifier)
 
-		_, _ = svc.verifyTokenFlow(ctx, 7, "tok")
-		_, _ = svc.verifyTokenFlow(ctx, 8, "tok")
+		_, _, _ = svc.verifyTokenFlow(ctx, 7, "tok")
+		_, _, _ = svc.verifyTokenFlow(ctx, 8, "tok")
 		assert.Equal(t, 2, verifier.callCount())
 	})
 }
@@ -177,12 +205,13 @@ func TestVerifyTokenRPC(t *testing.T) {
 		assert.Equal(t, int32(CodeInvalidTok), resp.GetCode())
 	})
 
-	t.Run("valid token via account", func(t *testing.T) {
-		svc := newTestServer(newMemCache(), &stubVerifier{valid: true})
-		resp, err := svc.VerifyToken(ctx, &pb.VerifyTokenReq{Uid: 1, Token: "real"})
+	t.Run("valid token resolved with uid", func(t *testing.T) {
+		svc := newTestServer(newMemCache(), &stubVerifier{uid: 42, valid: true})
+		resp, err := svc.VerifyToken(ctx, &pb.VerifyTokenReq{Token: "real"})
 		require.NoError(t, err)
 		assert.True(t, resp.GetValid())
 		assert.Equal(t, int32(CodeOK), resp.GetCode())
+		assert.Equal(t, int64(42), resp.GetUid())
 	})
 
 	t.Run("unimplemented RPCs return codes.Unimplemented", func(t *testing.T) {
@@ -202,6 +231,39 @@ func TestVerifyTokenRPC(t *testing.T) {
 	})
 }
 
+// TestHTTPVerifierAgainstStubServer 用 httptest 模拟 account。
+func TestHTTPVerifierAgainstStubServer(t *testing.T) {
+	t.Run("valid response parsed with uid", func(t *testing.T) {
+		srv := stubAccountServer(t, `{"code":0,"msg":"ok","data":{"uid":7,"valid":true}}`, 200)
+		v := NewHTTPVerifier(srv.URL, time.Second)
+		uid, valid, err := v.Verify(context.Background(), 7, "tok")
+		require.NoError(t, err)
+		assert.True(t, valid)
+		assert.Equal(t, int64(7), uid)
+	})
+
+	t.Run("invalid response parsed", func(t *testing.T) {
+		srv := stubAccountServer(t, `{"code":40101,"msg":"x","data":{"uid":0,"valid":false}}`, 200)
+		v := NewHTTPVerifier(srv.URL, time.Second)
+		_, valid, err := v.Verify(context.Background(), 7, "tok")
+		require.NoError(t, err)
+		assert.False(t, valid)
+	})
+
+	t.Run("non-2xx treated as unreachable", func(t *testing.T) {
+		srv := stubAccountServer(t, `boom`, 503)
+		v := NewHTTPVerifier(srv.URL, time.Second)
+		_, _, err := v.Verify(context.Background(), 7, "tok")
+		assert.Error(t, err)
+	})
+
+	t.Run("connection refused treated as unreachable", func(t *testing.T) {
+		v := NewHTTPVerifier("http://127.0.0.1:1", 200*time.Millisecond)
+		_, _, err := v.Verify(context.Background(), 7, "tok")
+		assert.Error(t, err)
+	})
+}
+
 // stubAccountServer 启动一个返回固定 body/status 的 account 桩服务。
 func stubAccountServer(t *testing.T, body string, status int) *httptest.Server {
 	t.Helper()
@@ -211,36 +273,4 @@ func stubAccountServer(t *testing.T, body string, status int) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
-}
-
-// TestHTTPVerifierAgainstStubServer 用 httptest 模拟 account。
-func TestHTTPVerifierAgainstStubServer(t *testing.T) {
-	t.Run("valid response parsed", func(t *testing.T) {
-		srv := stubAccountServer(t, `{"code":0,"msg":"ok","data":{"uid":7,"valid":true}}`, 200)
-		v := NewHTTPVerifier(srv.URL, time.Second)
-		valid, err := v.Verify(context.Background(), 7, "tok")
-		require.NoError(t, err)
-		assert.True(t, valid)
-	})
-
-	t.Run("invalid response parsed", func(t *testing.T) {
-		srv := stubAccountServer(t, `{"code":40101,"msg":"x","data":{"uid":0,"valid":false}}`, 200)
-		v := NewHTTPVerifier(srv.URL, time.Second)
-		valid, err := v.Verify(context.Background(), 7, "tok")
-		require.NoError(t, err)
-		assert.False(t, valid)
-	})
-
-	t.Run("non-2xx treated as unreachable", func(t *testing.T) {
-		srv := stubAccountServer(t, `boom`, 503)
-		v := NewHTTPVerifier(srv.URL, time.Second)
-		_, err := v.Verify(context.Background(), 7, "tok")
-		assert.Error(t, err)
-	})
-
-	t.Run("connection refused treated as unreachable", func(t *testing.T) {
-		v := NewHTTPVerifier("http://127.0.0.1:1", 200*time.Millisecond)
-		_, err := v.Verify(context.Background(), 7, "tok")
-		assert.Error(t, err)
-	})
 }

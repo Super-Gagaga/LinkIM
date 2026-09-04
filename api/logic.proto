@@ -35,6 +35,7 @@ message VerifyTokenReq {
 message VerifyTokenResp {
   bool valid = 1;
   int32 code = 2; // 0 有效；40101 无效；50102 account 不可达
+  int64 uid = 3; // token 归属的真实 uid（account 返回），comet 据此绑定连接
 }
 
 message SendMsgReq {

@@ -52,6 +52,7 @@ message AuthReq {
   string token = 1;
   string device_id = 2;
   int32 platform = 3; // 1手机 2平板 3桌面 4Web（同端互踢按 platform 判定）
+  int64 uid = 4; // 登录接口返回的 uid；服务端校验与 token 一致性后使用
 }
 
 // AUTH_ACK 响应体 (cmd=0x02)
@@ -85,6 +86,7 @@ message SyncResp {
   string conv_id = 1;
   repeated MsgPush messages = 2;
   int64 max_seq = 3; // 会话当前最新 seq，客户端据此判断是否追平
+  int32 code = 4; // 业务码：0 成功；非 0 时 messages 为空
 }
 
 // ===== 撤回 =====

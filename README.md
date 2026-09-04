@@ -55,6 +55,9 @@ make test-int
 
 # 5. 启动单个服务（示例：account）
 ./bin/account.exe -conf configs/account.yaml
+
+# 6. WebSocket 联调客户端（自动 AUTH + 周期心跳，打印收到的所有帧）
+go run ./scripts/wsclient.go -addr ws://127.0.0.1:8081/ws -token <access_token> -uid <uid>
 ```
 
 > 端口说明：本机 3306/3307/6379 已被占用，compose 将 MySQL 映射到 23306、Redis 映射到 16379（容器内仍为默认端口）。
@@ -80,6 +83,7 @@ make test-int
 | S2 | 存储层与中间件封装（mysqlx / redisx / kafkax） | ✅ |
 | S3 | Account 账号服务（HTTP + JWT） | ✅ |
 | S4 | Logic 骨架与鉴权（gRPC） | ✅ |
-| S5+ | Comet / Job 等服务实现 | ⬜ |
+| S5 | Comet 长连接接入层（WS + 互踢 + 路由表） | ✅ |
+| S6+ | 单聊链路 / Job 等服务实现 | ⬜ |
 
 详细里程碑见 `docs/implementation-guide.md`。

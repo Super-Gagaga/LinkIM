@@ -13,11 +13,12 @@ import (
 // ServerConfig 定义单个服务的标识与监听端口。
 // 并非每个服务都使用所有端口（例如 job 不监听任何端口）。
 type ServerConfig struct {
-	Name     string `mapstructure:"name"`
-	HTTPPort int    `mapstructure:"http_port"`
-	GRPCPort int    `mapstructure:"grpc_port"`
-	WSPort   int    `mapstructure:"ws_port"`
-	NodeID   int64  `mapstructure:"node_id"` // snowflake 节点 ID，集群内唯一
+	Name          string `mapstructure:"name"`
+	HTTPPort      int    `mapstructure:"http_port"`
+	GRPCPort      int    `mapstructure:"grpc_port"`
+	WSPort        int    `mapstructure:"ws_port"`
+	NodeID        int64  `mapstructure:"node_id"`        // snowflake 节点 ID，集群内唯一
+	AdvertiseAddr string `mapstructure:"advertise_addr"` // 对外可达的 gRPC 地址（写入路由表），如 10.0.1.12:9000
 }
 
 // MySQLConfig 定义 MySQL DSN 与连接池调优参数。
@@ -61,6 +62,12 @@ type AccountConfig struct {
 	VerifyTimeout time.Duration `mapstructure:"verify_timeout"`
 }
 
+// LogicConfig 定义上游 logic 服务地址（comet 调用 VerifyToken/SendMsg 等）。
+type LogicConfig struct {
+	Addr        string        `mapstructure:"addr"`
+	CallTimeout time.Duration `mapstructure:"call_timeout"`
+}
+
 // Config 是单个 LinkIM 服务的完整配置。
 type Config struct {
 	Server  ServerConfig  `mapstructure:"server"`
@@ -70,6 +77,7 @@ type Config struct {
 	Log     LogConfig     `mapstructure:"log"`
 	JWT     JWTConfig     `mapstructure:"jwt"`
 	Account AccountConfig `mapstructure:"account"`
+	Logic   LogicConfig   `mapstructure:"logic"`
 }
 
 // EnvPrefix 是用于覆盖文件配置值的环境变量前缀，
@@ -111,6 +119,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.grpc_port", 0)
 	v.SetDefault("server.ws_port", 0)
 	v.SetDefault("server.node_id", 0)
+	v.SetDefault("server.advertise_addr", "")
 
 	v.SetDefault("mysql.dsn", "")
 	v.SetDefault("mysql.max_open_conns", 64)
@@ -133,4 +142,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("account.addr", "http://127.0.0.1:8080")
 	v.SetDefault("account.verify_timeout", time.Second)
+
+	v.SetDefault("logic.addr", "127.0.0.1:9001")
+	v.SetDefault("logic.call_timeout", 2*time.Second)
 }

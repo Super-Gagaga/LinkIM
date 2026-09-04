@@ -34,9 +34,10 @@ type Cache interface {
 }
 
 // Verifier 抽象回源校验（account HTTP 实现），便于单测 mock。
-// 返回 (valid, err)：err 非空表示 account 不可达（网络/5xx）。
+// 返回 (uid, valid, err)：uid 为 token 归属用户；
+// err 非空表示 account 不可达（网络/5xx）。
 type Verifier interface {
-	Verify(ctx context.Context, uid int64, token string) (bool, error)
+	Verify(ctx context.Context, uid int64, token string) (int64, bool, error)
 }
 
 // TokenCacheKey 生成 verify 缓存 key：tokencache:{uid}:{sha256(token) 前 16 字节}。
@@ -46,8 +47,9 @@ func TokenCacheKey(uid int64, token string) string {
 }
 
 // verifyTokenFlow 执行校验流程：缓存 → miss 回源 account → 回填缓存。
+// 返回 token 归属的真实 uid（缓存命中时即请求 uid）。
 // account 不可达时返回 50102 且不写缓存（避免负结果污染）。
-func (s *Server) verifyTokenFlow(ctx context.Context, uid int64, token string) (bool, int32) {
+func (s *Server) verifyTokenFlow(ctx context.Context, uid int64, token string) (int64, bool, int32) {
 	key := TokenCacheKey(uid, token)
 
 	if cached, err := s.cache.Get(ctx, key); err != nil {
@@ -61,13 +63,17 @@ func (s *Server) verifyTokenFlow(ctx context.Context, uid int64, token string) (
 		}
 		s.logger.Info("verify token cache hit",
 			zap.Int64("uid", uid), zap.Bool("valid", valid))
-		return valid, code
+		return uid, valid, code
 	}
 
-	valid, err := s.verifier.Verify(ctx, uid, token)
+	realUID, valid, err := s.verifier.Verify(ctx, uid, token)
 	if err != nil {
 		s.logger.Warn("account verify unreachable", zap.Int64("uid", uid), zap.Error(err))
-		return false, CodeAccountDown
+		return 0, false, CodeAccountDown
+	}
+	// 调用方声明了 uid 时校验一致性（防 token 冒用他人 uid）。
+	if uid != 0 && realUID != uid {
+		valid = false
 	}
 
 	code := int32(CodeOK)
@@ -83,6 +89,6 @@ func (s *Server) verifyTokenFlow(ctx context.Context, uid int64, token string) (
 		s.logger.Warn("token cache write failed", zap.Error(err))
 	}
 	s.logger.Info("verify token via account",
-		zap.Int64("uid", uid), zap.Bool("valid", valid))
-	return valid, code
+		zap.Int64("uid", realUID), zap.Bool("valid", valid))
+	return realUID, valid, code
 }

@@ -3,6 +3,7 @@ server:
   name: comet
   ws_port: 8081
   grpc_port: 9000
+  advertise_addr: "127.0.0.1:9000" # 写入路由表的对外 gRPC 地址，跨机互踢/投递时使用
 
 mysql:
   dsn: ""
@@ -23,3 +24,7 @@ kafka:
 log:
   level: debug
   format: console
+
+logic:
+  addr: "127.0.0.1:9001"
+  call_timeout: 2s

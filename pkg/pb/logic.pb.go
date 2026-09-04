@@ -80,6 +80,7 @@ type VerifyTokenResp struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Valid         bool                   `protobuf:"varint,1,opt,name=valid,proto3" json:"valid,omitempty"`
 	Code          int32                  `protobuf:"varint,2,opt,name=code,proto3" json:"code,omitempty"` // 0 有效；40101 无效；50102 account 不可达
+	Uid           int64                  `protobuf:"varint,3,opt,name=uid,proto3" json:"uid,omitempty"`   // token 归属的真实 uid（account 返回），comet 据此绑定连接
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -124,6 +125,13 @@ func (x *VerifyTokenResp) GetValid() bool {
 func (x *VerifyTokenResp) GetCode() int32 {
 	if x != nil {
 		return x.Code
+	}
+	return 0
+}
+
+func (x *VerifyTokenResp) GetUid() int64 {
+	if x != nil {
+		return x.Uid
 	}
 	return 0
 }
@@ -636,10 +644,11 @@ const file_logic_proto_rawDesc = "" +
 	"\vlogic.proto\x12\x0flinkim.logic.v1\x1a\x0eprotocol.proto\"8\n" +
 	"\x0eVerifyTokenReq\x12\x10\n" +
 	"\x03uid\x18\x01 \x01(\x03R\x03uid\x12\x14\n" +
-	"\x05token\x18\x02 \x01(\tR\x05token\";\n" +
+	"\x05token\x18\x02 \x01(\tR\x05token\"M\n" +
 	"\x0fVerifyTokenResp\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x12\x12\n" +
-	"\x04code\x18\x02 \x01(\x05R\x04code\"\xd5\x01\n" +
+	"\x04code\x18\x02 \x01(\x05R\x04code\x12\x10\n" +
+	"\x03uid\x18\x03 \x01(\x03R\x03uid\"\xd5\x01\n" +
 	"\n" +
 	"SendMsgReq\x12\x1b\n" +
 	"\tsender_id\x18\x01 \x01(\x03R\bsenderId\x12\x17\n" +

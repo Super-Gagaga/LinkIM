@@ -37,34 +37,35 @@ func NewHTTPVerifier(addr string, timeout time.Duration) *HTTPVerifier {
 }
 
 // Verify 实现 Verifier：POST /internal/v1/verify。
+// 返回 account 侧解析出的真实 uid 与校验结果；
 // 网络错误与非 2xx 均视为 account 不可达（返回错误）。
-func (v *HTTPVerifier) Verify(ctx context.Context, uid int64, token string) (bool, error) {
+func (v *HTTPVerifier) Verify(ctx context.Context, uid int64, token string) (int64, bool, error) {
 	body, err := json.Marshal(map[string]any{"token": token})
 	if err != nil {
-		return false, fmt.Errorf("logic: marshal verify req: %w", err)
+		return 0, false, fmt.Errorf("logic: marshal verify req: %w", err)
 	}
 	url := v.addr + "/internal/v1/verify"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return false, fmt.Errorf("logic: build verify req: %w", err)
+		return 0, false, fmt.Errorf("logic: build verify req: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := v.client.Do(req)
 	if err != nil {
-		return false, fmt.Errorf("logic: post %s: %w", url, err)
+		return 0, false, fmt.Errorf("logic: post %s: %w", url, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return false, fmt.Errorf("logic: %s returned status %d", url, resp.StatusCode)
+		return 0, false, fmt.Errorf("logic: %s returned status %d", url, resp.StatusCode)
 	}
 
 	var out accountVerifyResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxVerifyBody)).Decode(&out); err != nil {
-		return false, fmt.Errorf("logic: decode verify resp: %w", err)
+		return 0, false, fmt.Errorf("logic: decode verify resp: %w", err)
 	}
-	return out.Data.Valid, nil
+	return out.Data.UID, out.Data.Valid, nil
 }
 
 // maxVerifyBody 限制响应体读取，防御异常上游。
