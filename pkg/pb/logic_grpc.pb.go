@@ -27,6 +27,8 @@ const (
 	Logic_SyncPull_FullMethodName        = "/linkim.logic.v1.Logic/SyncPull"
 	Logic_ReportDelivered_FullMethodName = "/linkim.logic.v1.Logic/ReportDelivered"
 	Logic_OnlineEvent_FullMethodName     = "/linkim.logic.v1.Logic/OnlineEvent"
+	Logic_GetPendingConvs_FullMethodName = "/linkim.logic.v1.Logic/GetPendingConvs"
+	Logic_MarkRead_FullMethodName        = "/linkim.logic.v1.Logic/MarkRead"
 )
 
 // LogicClient is the client API for Logic service.
@@ -43,8 +45,13 @@ type LogicClient interface {
 	SyncPull(ctx context.Context, in *SyncPullReq, opts ...grpc.CallOption) (*SyncPullResp, error)
 	// S7 实现：接收端已投递回执（观测用）。
 	ReportDelivered(ctx context.Context, in *ReportDeliveredReq, opts ...grpc.CallOption) (*Empty, error)
-	// 上下线事件（Comet AUTH 成功/断连时上报）。
-	OnlineEvent(ctx context.Context, in *OnlineEventReq, opts ...grpc.CallOption) (*Empty, error)
+	// S8 实现：上下线事件。上线时返回该用户有未读增量的会话列表
+	// （复用 ConvBrief，comet 组装 SYNC_NOTIFY 帧推给刚上线的连接）。
+	OnlineEvent(ctx context.Context, in *OnlineEventReq, opts ...grpc.CallOption) (*PendingResp, error)
+	// S8 实现：查询 uid 的未读会话列表（last_seq > read_seq）。
+	GetPendingConvs(ctx context.Context, in *PendingReq, opts ...grpc.CallOption) (*PendingResp, error)
+	// S8 实现：已读上报，推进 read_seq 游标并扣减未读。
+	MarkRead(ctx context.Context, in *MarkReadReq, opts ...grpc.CallOption) (*Empty, error)
 }
 
 type logicClient struct {
@@ -95,10 +102,30 @@ func (c *logicClient) ReportDelivered(ctx context.Context, in *ReportDeliveredRe
 	return out, nil
 }
 
-func (c *logicClient) OnlineEvent(ctx context.Context, in *OnlineEventReq, opts ...grpc.CallOption) (*Empty, error) {
+func (c *logicClient) OnlineEvent(ctx context.Context, in *OnlineEventReq, opts ...grpc.CallOption) (*PendingResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PendingResp)
+	err := c.cc.Invoke(ctx, Logic_OnlineEvent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *logicClient) GetPendingConvs(ctx context.Context, in *PendingReq, opts ...grpc.CallOption) (*PendingResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PendingResp)
+	err := c.cc.Invoke(ctx, Logic_GetPendingConvs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *logicClient) MarkRead(ctx context.Context, in *MarkReadReq, opts ...grpc.CallOption) (*Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Empty)
-	err := c.cc.Invoke(ctx, Logic_OnlineEvent_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, Logic_MarkRead_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -119,8 +146,13 @@ type LogicServer interface {
 	SyncPull(context.Context, *SyncPullReq) (*SyncPullResp, error)
 	// S7 实现：接收端已投递回执（观测用）。
 	ReportDelivered(context.Context, *ReportDeliveredReq) (*Empty, error)
-	// 上下线事件（Comet AUTH 成功/断连时上报）。
-	OnlineEvent(context.Context, *OnlineEventReq) (*Empty, error)
+	// S8 实现：上下线事件。上线时返回该用户有未读增量的会话列表
+	// （复用 ConvBrief，comet 组装 SYNC_NOTIFY 帧推给刚上线的连接）。
+	OnlineEvent(context.Context, *OnlineEventReq) (*PendingResp, error)
+	// S8 实现：查询 uid 的未读会话列表（last_seq > read_seq）。
+	GetPendingConvs(context.Context, *PendingReq) (*PendingResp, error)
+	// S8 实现：已读上报，推进 read_seq 游标并扣减未读。
+	MarkRead(context.Context, *MarkReadReq) (*Empty, error)
 	mustEmbedUnimplementedLogicServer()
 }
 
@@ -143,8 +175,14 @@ func (UnimplementedLogicServer) SyncPull(context.Context, *SyncPullReq) (*SyncPu
 func (UnimplementedLogicServer) ReportDelivered(context.Context, *ReportDeliveredReq) (*Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReportDelivered not implemented")
 }
-func (UnimplementedLogicServer) OnlineEvent(context.Context, *OnlineEventReq) (*Empty, error) {
+func (UnimplementedLogicServer) OnlineEvent(context.Context, *OnlineEventReq) (*PendingResp, error) {
 	return nil, status.Error(codes.Unimplemented, "method OnlineEvent not implemented")
+}
+func (UnimplementedLogicServer) GetPendingConvs(context.Context, *PendingReq) (*PendingResp, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetPendingConvs not implemented")
+}
+func (UnimplementedLogicServer) MarkRead(context.Context, *MarkReadReq) (*Empty, error) {
+	return nil, status.Error(codes.Unimplemented, "method MarkRead not implemented")
 }
 func (UnimplementedLogicServer) mustEmbedUnimplementedLogicServer() {}
 func (UnimplementedLogicServer) testEmbeddedByValue()               {}
@@ -257,6 +295,42 @@ func _Logic_OnlineEvent_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Logic_GetPendingConvs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PendingReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LogicServer).GetPendingConvs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Logic_GetPendingConvs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LogicServer).GetPendingConvs(ctx, req.(*PendingReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Logic_MarkRead_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MarkReadReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LogicServer).MarkRead(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Logic_MarkRead_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LogicServer).MarkRead(ctx, req.(*MarkReadReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Logic_ServiceDesc is the grpc.ServiceDesc for Logic service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -283,6 +357,14 @@ var Logic_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "OnlineEvent",
 			Handler:    _Logic_OnlineEvent_Handler,
+		},
+		{
+			MethodName: "GetPendingConvs",
+			Handler:    _Logic_GetPendingConvs_Handler,
+		},
+		{
+			MethodName: "MarkRead",
+			Handler:    _Logic_MarkRead_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

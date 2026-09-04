@@ -71,6 +71,8 @@ func main() {
 		Idem:     logic.NewRedisIdemStore(rdb),
 		IDs:      ids,
 		Producer: producer,
+		Sync:     logic.NewMySQLSyncStore(db),
+		Redis:    rdb,
 		Logger:   logger,
 	})
 	pb.RegisterLogicServer(srv, pbLogic)

@@ -13,8 +13,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/linkim/linkim/pkg/pb"
 )
@@ -214,18 +212,7 @@ func TestVerifyTokenRPC(t *testing.T) {
 		assert.Equal(t, int64(42), resp.GetUid())
 	})
 
-	t.Run("unimplemented RPCs return codes.Unimplemented", func(t *testing.T) {
-		svc := newTestServer(newMemCache(), &stubVerifier{})
-		// SendMsg 自 S6 起已实现，不再断言其 Unimplemented。
-
-		// SendMsg（S6）与 ReportDelivered（S7）已实现。
-
-		_, err := svc.SyncPull(ctx, &pb.SyncPullReq{})
-		assert.Equal(t, codes.Unimplemented, status.Code(err))
-
-		_, err = svc.OnlineEvent(ctx, &pb.OnlineEventReq{})
-		assert.Equal(t, codes.Unimplemented, status.Code(err))
-	})
+	// S8 后全部 RPC 均已实现，无 Unimplemented 断言。
 }
 
 // TestHTTPVerifierAgainstStubServer 用 httptest 模拟 account。

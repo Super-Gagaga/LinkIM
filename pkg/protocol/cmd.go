@@ -19,6 +19,8 @@ const (
 	CmdSyncResp       Cmd = 0x0A // S→C：同步结果
 	CmdRecall         Cmd = 0x0B // C→S：消息撤回
 	CmdTyping         Cmd = 0x0C // 双向：正在输入/在线状态
+	// 0x0D 预留给 S10 的 RECONNECT_NOW（comet drain 通知）。
+	CmdSyncNotify Cmd = 0x0E // S→C：上线未读会话通知（触发客户端 SYNC_PULL，设计文档 10.2）
 )
 
 // cmdNames 将每个命令字映射为稳定可读的名称，用于日志输出。
@@ -35,6 +37,7 @@ var cmdNames = map[Cmd]string{
 	CmdSyncResp:       "SYNC_RESP",
 	CmdRecall:         "RECALL",
 	CmdTyping:         "TYPING",
+	CmdSyncNotify:     "SYNC_NOTIFY",
 }
 
 // CmdString 返回命令字的可读名称；不属于协议的命令字

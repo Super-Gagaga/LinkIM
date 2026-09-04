@@ -13,6 +13,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -65,7 +66,8 @@ func main() {
 	defer heartbeat.Stop()
 
 	errCh := make(chan error, 1)
-	dedup := newLRU(1024) // 按 msg_id 去重（模拟真实客户端，网络重试可能重复推送）
+	dedup := newLRU(1024)          // 按 msg_id 去重（模拟真实客户端，网络重试可能重复推送）
+	syncSeqs := map[string]int64{} // conv -> 本地最大 seq（补拉游标）
 	go func() {
 		for {
 			mt, data, err := ws.ReadMessage()
@@ -82,11 +84,24 @@ func main() {
 				fmt.Printf("[recv] 帧解析失败: %v\n", err)
 				continue
 			}
-			if frame.Cmd == protocol.CmdMsgPush {
+			switch frame.Cmd {
+			case protocol.CmdMsgPush:
 				var m pb.MsgPush
-				if proto.Unmarshal(frame.Body, &m) == nil && !dedup.add(m.GetMsgId()) {
-					fmt.Printf("[dup] %s msg_id=%s 已收到过，丢弃\n", protocol.CmdString(frame.Cmd), m.GetMsgId())
-					continue
+				if proto.Unmarshal(frame.Body, &m) == nil {
+					if !dedup.add(m.GetMsgId()) {
+						fmt.Printf("[dup] MSG_PUSH msg_id=%s 已收到过，丢弃\n", m.GetMsgId())
+						continue
+					}
+					if m.GetSeq() > syncSeqs[m.GetConvId()] {
+						syncSeqs[m.GetConvId()] = m.GetSeq()
+					}
+				}
+			case protocol.CmdSyncNotify:
+				// 上线未读通知：逐会话循环 SYNC_PULL 直到追平 max_seq，
+				// 完成后用 MSG_RECEIVED_ACK 上报 MarkRead（设计文档 10.2）。
+				var n pb.SyncNotifyReq
+				if proto.Unmarshal(frame.Body, &n) == nil {
+					catchUp(ws, nextSeq, syncSeqs, n.GetConvs()) // 必须在读循环内同步执行（独占读）
 				}
 			}
 			describe(frame)
@@ -129,8 +144,10 @@ func main() {
 			return
 		case <-interrupt:
 			fmt.Println("[conn] Ctrl+C，主动断开")
+			writeMu.Lock()
 			_ = ws.WriteMessage(websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.CloseNormalClosure, "bye"))
+			writeMu.Unlock()
 			return
 		}
 	}
@@ -179,6 +196,8 @@ func (l *lru) add(id string) bool {
 	return true
 }
 
+var writeMu sync.Mutex // gorilla 并发写不安全，串行化所有帧写出
+
 // send 编码一帧并发送。
 func send(ws *websocket.Conn, cmd protocol.Cmd, seq uint32, msg proto.Message) {
 	body, err := proto.Marshal(msg)
@@ -189,6 +208,8 @@ func send(ws *websocket.Conn, cmd protocol.Cmd, seq uint32, msg proto.Message) {
 	if err != nil {
 		log.Fatalf("encode %s 失败: %v", protocol.CmdString(cmd), err)
 	}
+	writeMu.Lock()
+	defer writeMu.Unlock()
 	if err := ws.WriteMessage(websocket.BinaryMessage, frame); err != nil {
 		log.Fatalf("发送 %s 失败: %v", protocol.CmdString(cmd), err)
 	}
@@ -225,4 +246,72 @@ func describe(f protocol.Frame) {
 	default:
 		fmt.Printf("[recv] %s seq=%d body=%dB\n", name, f.Seq, len(f.Body))
 	}
+}
+
+// catchUp 逐会话按本地游标循环 SYNC_PULL(100) 直到追平 max_seq，
+// 全部完成后按会话最大 seq 发 MSG_RECEIVED_ACK（服务端据此 MarkRead）。
+func catchUp(ws *websocket.Conn, nextSeq func() uint32, syncSeqs map[string]int64, convs []*pb.ConvBrief) {
+	for _, cv := range convs {
+		local := syncSeqs[cv.GetConvId()]
+		got := 0
+		for round := 0; ; round++ {
+			if local >= cv.GetMaxSeq() {
+				break
+			}
+			send(ws, protocol.CmdSyncPull, nextSeq(), &pb.SyncPullReq{
+				ConvId: cv.GetConvId(), LocalMaxSeq: local, Limit: 100,
+			})
+			// 等待 SYNC_RESP（同步读，简单起见）。
+			resp, err := readSyncResp(ws)
+			if err != nil {
+				fmt.Printf("[sync] conv=%s 拉取失败: %v\n", cv.GetConvId(), err)
+				return
+			}
+			for _, m := range resp.GetMessages() {
+				got++
+				if m.GetSeq() > local {
+					local = m.GetSeq()
+				}
+				fmt.Printf("[sync-msg] conv=%s seq=%d from=%d payload=%q\n",
+					m.GetConvId(), m.GetSeq(), m.GetSenderId(), string(m.GetPayload()))
+			}
+			syncSeqs[cv.GetConvId()] = local
+			if resp.GetMaxSeq() > cv.GetMaxSeq() {
+				cv.MaxSeq = resp.GetMaxSeq() // 服务端又来了新消息，继续追
+			}
+			if len(resp.GetMessages()) == 0 {
+				break
+			}
+		}
+		fmt.Printf("[sync] conv=%s got=%d local_max=%d target=%d\n",
+			cv.GetConvId(), got, local, cv.GetMaxSeq())
+		if local > 0 {
+			send(ws, protocol.CmdMsgReceivedAck, nextSeq(), &pb.ReceivedAckReq{
+				ConvId: cv.GetConvId(), Seq: local,
+			})
+		}
+	}
+}
+
+// readSyncResp 阻塞读取下一帧直到 SYNC_RESP（与心跳等并发帧交错时跳过其他帧）。
+func readSyncResp(ws *websocket.Conn) (*pb.SyncResp, error) {
+	for i := 0; i < 64; i++ { // 有限尝试，避免永久阻塞
+		mt, data, err := ws.ReadMessage()
+		if err != nil {
+			return nil, err
+		}
+		if mt != websocket.BinaryMessage {
+			continue
+		}
+		frame, err := protocol.Decode(data)
+		if err != nil || frame.Cmd != protocol.CmdSyncResp {
+			continue
+		}
+		var resp pb.SyncResp
+		if err := proto.Unmarshal(frame.Body, &resp); err != nil {
+			return nil, err
+		}
+		return &resp, nil
+	}
+	return nil, fmt.Errorf("SYNC_RESP 未在有限帧内到达")
 }

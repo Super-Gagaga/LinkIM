@@ -637,6 +637,155 @@ func (*Empty) Descriptor() ([]byte, []int) {
 	return file_logic_proto_rawDescGZIP(), []int{8}
 }
 
+type PendingReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Uid           int64                  `protobuf:"varint,1,opt,name=uid,proto3" json:"uid,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PendingReq) Reset() {
+	*x = PendingReq{}
+	mi := &file_logic_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PendingReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PendingReq) ProtoMessage() {}
+
+func (x *PendingReq) ProtoReflect() protoreflect.Message {
+	mi := &file_logic_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PendingReq.ProtoReflect.Descriptor instead.
+func (*PendingReq) Descriptor() ([]byte, []int) {
+	return file_logic_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *PendingReq) GetUid() int64 {
+	if x != nil {
+		return x.Uid
+	}
+	return 0
+}
+
+type PendingResp struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 复用客户端协议的 ConvBrief，避免与 pkg/pb 中同名消息冲突。
+	Convs         []*ConvBrief `protobuf:"bytes,1,rep,name=convs,proto3" json:"convs,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PendingResp) Reset() {
+	*x = PendingResp{}
+	mi := &file_logic_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PendingResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PendingResp) ProtoMessage() {}
+
+func (x *PendingResp) ProtoReflect() protoreflect.Message {
+	mi := &file_logic_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PendingResp.ProtoReflect.Descriptor instead.
+func (*PendingResp) Descriptor() ([]byte, []int) {
+	return file_logic_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *PendingResp) GetConvs() []*ConvBrief {
+	if x != nil {
+		return x.Convs
+	}
+	return nil
+}
+
+type MarkReadReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Uid           int64                  `protobuf:"varint,1,opt,name=uid,proto3" json:"uid,omitempty"`
+	ConvId        string                 `protobuf:"bytes,2,opt,name=conv_id,json=convId,proto3" json:"conv_id,omitempty"`
+	Seq           int64                  `protobuf:"varint,3,opt,name=seq,proto3" json:"seq,omitempty"` // 已读到的会话 seq（新游标）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarkReadReq) Reset() {
+	*x = MarkReadReq{}
+	mi := &file_logic_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkReadReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkReadReq) ProtoMessage() {}
+
+func (x *MarkReadReq) ProtoReflect() protoreflect.Message {
+	mi := &file_logic_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkReadReq.ProtoReflect.Descriptor instead.
+func (*MarkReadReq) Descriptor() ([]byte, []int) {
+	return file_logic_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *MarkReadReq) GetUid() int64 {
+	if x != nil {
+		return x.Uid
+	}
+	return 0
+}
+
+func (x *MarkReadReq) GetConvId() string {
+	if x != nil {
+		return x.ConvId
+	}
+	return ""
+}
+
+func (x *MarkReadReq) GetSeq() int64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
 var File_logic_proto protoreflect.FileDescriptor
 
 const file_logic_proto_rawDesc = "" +
@@ -689,13 +838,24 @@ const file_logic_proto_rawDesc = "" +
 	"\n" +
 	"comet_addr\x18\x04 \x01(\tR\tcometAddr\x12\x16\n" +
 	"\x06online\x18\x05 \x01(\bR\x06online\"\a\n" +
-	"\x05Empty2\xfc\x02\n" +
+	"\x05Empty\"\x1e\n" +
+	"\n" +
+	"PendingReq\x12\x10\n" +
+	"\x03uid\x18\x01 \x01(\x03R\x03uid\"<\n" +
+	"\vPendingResp\x12-\n" +
+	"\x05convs\x18\x01 \x03(\v2\x17.linkim.pb.v1.ConvBriefR\x05convs\"J\n" +
+	"\vMarkReadReq\x12\x10\n" +
+	"\x03uid\x18\x01 \x01(\x03R\x03uid\x12\x17\n" +
+	"\aconv_id\x18\x02 \x01(\tR\x06convId\x12\x10\n" +
+	"\x03seq\x18\x03 \x01(\x03R\x03seq2\x92\x04\n" +
 	"\x05Logic\x12P\n" +
 	"\vVerifyToken\x12\x1f.linkim.logic.v1.VerifyTokenReq\x1a .linkim.logic.v1.VerifyTokenResp\x12C\n" +
 	"\aSendMsg\x12\x1b.linkim.logic.v1.SendMsgReq\x1a\x1b.linkim.logic.v1.SendMsgAck\x12D\n" +
 	"\bSyncPull\x12\x19.linkim.pb.v1.SyncPullReq\x1a\x1d.linkim.logic.v1.SyncPullResp\x12N\n" +
-	"\x0fReportDelivered\x12#.linkim.logic.v1.ReportDeliveredReq\x1a\x16.linkim.logic.v1.Empty\x12F\n" +
-	"\vOnlineEvent\x12\x1f.linkim.logic.v1.OnlineEventReq\x1a\x16.linkim.logic.v1.EmptyB!Z\x1fgithub.com/linkim/linkim/pkg/pbb\x06proto3"
+	"\x0fReportDelivered\x12#.linkim.logic.v1.ReportDeliveredReq\x1a\x16.linkim.logic.v1.Empty\x12L\n" +
+	"\vOnlineEvent\x12\x1f.linkim.logic.v1.OnlineEventReq\x1a\x1c.linkim.logic.v1.PendingResp\x12L\n" +
+	"\x0fGetPendingConvs\x12\x1b.linkim.logic.v1.PendingReq\x1a\x1c.linkim.logic.v1.PendingResp\x12@\n" +
+	"\bMarkRead\x12\x1c.linkim.logic.v1.MarkReadReq\x1a\x16.linkim.logic.v1.EmptyB!Z\x1fgithub.com/linkim/linkim/pkg/pbb\x06proto3"
 
 var (
 	file_logic_proto_rawDescOnce sync.Once
@@ -709,7 +869,7 @@ func file_logic_proto_rawDescGZIP() []byte {
 	return file_logic_proto_rawDescData
 }
 
-var file_logic_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_logic_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_logic_proto_goTypes = []any{
 	(*VerifyTokenReq)(nil),     // 0: linkim.logic.v1.VerifyTokenReq
 	(*VerifyTokenResp)(nil),    // 1: linkim.logic.v1.VerifyTokenResp
@@ -720,25 +880,34 @@ var file_logic_proto_goTypes = []any{
 	(*ReportDeliveredReq)(nil), // 6: linkim.logic.v1.ReportDeliveredReq
 	(*OnlineEventReq)(nil),     // 7: linkim.logic.v1.OnlineEventReq
 	(*Empty)(nil),              // 8: linkim.logic.v1.Empty
-	(*SyncPullReq)(nil),        // 9: linkim.pb.v1.SyncPullReq
+	(*PendingReq)(nil),         // 9: linkim.logic.v1.PendingReq
+	(*PendingResp)(nil),        // 10: linkim.logic.v1.PendingResp
+	(*MarkReadReq)(nil),        // 11: linkim.logic.v1.MarkReadReq
+	(*ConvBrief)(nil),          // 12: linkim.pb.v1.ConvBrief
+	(*SyncPullReq)(nil),        // 13: linkim.pb.v1.SyncPullReq
 }
 var file_logic_proto_depIdxs = []int32{
-	5, // 0: linkim.logic.v1.SyncPullResp.messages:type_name -> linkim.logic.v1.PbMsg
-	0, // 1: linkim.logic.v1.Logic.VerifyToken:input_type -> linkim.logic.v1.VerifyTokenReq
-	2, // 2: linkim.logic.v1.Logic.SendMsg:input_type -> linkim.logic.v1.SendMsgReq
-	9, // 3: linkim.logic.v1.Logic.SyncPull:input_type -> linkim.pb.v1.SyncPullReq
-	6, // 4: linkim.logic.v1.Logic.ReportDelivered:input_type -> linkim.logic.v1.ReportDeliveredReq
-	7, // 5: linkim.logic.v1.Logic.OnlineEvent:input_type -> linkim.logic.v1.OnlineEventReq
-	1, // 6: linkim.logic.v1.Logic.VerifyToken:output_type -> linkim.logic.v1.VerifyTokenResp
-	3, // 7: linkim.logic.v1.Logic.SendMsg:output_type -> linkim.logic.v1.SendMsgAck
-	4, // 8: linkim.logic.v1.Logic.SyncPull:output_type -> linkim.logic.v1.SyncPullResp
-	8, // 9: linkim.logic.v1.Logic.ReportDelivered:output_type -> linkim.logic.v1.Empty
-	8, // 10: linkim.logic.v1.Logic.OnlineEvent:output_type -> linkim.logic.v1.Empty
-	6, // [6:11] is the sub-list for method output_type
-	1, // [1:6] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	5,  // 0: linkim.logic.v1.SyncPullResp.messages:type_name -> linkim.logic.v1.PbMsg
+	12, // 1: linkim.logic.v1.PendingResp.convs:type_name -> linkim.pb.v1.ConvBrief
+	0,  // 2: linkim.logic.v1.Logic.VerifyToken:input_type -> linkim.logic.v1.VerifyTokenReq
+	2,  // 3: linkim.logic.v1.Logic.SendMsg:input_type -> linkim.logic.v1.SendMsgReq
+	13, // 4: linkim.logic.v1.Logic.SyncPull:input_type -> linkim.pb.v1.SyncPullReq
+	6,  // 5: linkim.logic.v1.Logic.ReportDelivered:input_type -> linkim.logic.v1.ReportDeliveredReq
+	7,  // 6: linkim.logic.v1.Logic.OnlineEvent:input_type -> linkim.logic.v1.OnlineEventReq
+	9,  // 7: linkim.logic.v1.Logic.GetPendingConvs:input_type -> linkim.logic.v1.PendingReq
+	11, // 8: linkim.logic.v1.Logic.MarkRead:input_type -> linkim.logic.v1.MarkReadReq
+	1,  // 9: linkim.logic.v1.Logic.VerifyToken:output_type -> linkim.logic.v1.VerifyTokenResp
+	3,  // 10: linkim.logic.v1.Logic.SendMsg:output_type -> linkim.logic.v1.SendMsgAck
+	4,  // 11: linkim.logic.v1.Logic.SyncPull:output_type -> linkim.logic.v1.SyncPullResp
+	8,  // 12: linkim.logic.v1.Logic.ReportDelivered:output_type -> linkim.logic.v1.Empty
+	10, // 13: linkim.logic.v1.Logic.OnlineEvent:output_type -> linkim.logic.v1.PendingResp
+	10, // 14: linkim.logic.v1.Logic.GetPendingConvs:output_type -> linkim.logic.v1.PendingResp
+	8,  // 15: linkim.logic.v1.Logic.MarkRead:output_type -> linkim.logic.v1.Empty
+	9,  // [9:16] is the sub-list for method output_type
+	2,  // [2:9] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_logic_proto_init() }
@@ -753,7 +922,7 @@ func file_logic_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_logic_proto_rawDesc), len(file_logic_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

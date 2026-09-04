@@ -698,6 +698,120 @@ func (x *SyncResp) GetCode() int32 {
 	return 0
 }
 
+// 会话摘要（SYNC_NOTIFY / pending 列表共用）
+type ConvBrief struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ConvId        string                 `protobuf:"bytes,1,opt,name=conv_id,json=convId,proto3" json:"conv_id,omitempty"`
+	ConvType      int32                  `protobuf:"varint,2,opt,name=conv_type,json=convType,proto3" json:"conv_type,omitempty"`
+	MaxSeq        int64                  `protobuf:"varint,3,opt,name=max_seq,json=maxSeq,proto3" json:"max_seq,omitempty"` // 会话最新 seq
+	Unread        int32                  `protobuf:"varint,4,opt,name=unread,proto3" json:"unread,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConvBrief) Reset() {
+	*x = ConvBrief{}
+	mi := &file_protocol_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConvBrief) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConvBrief) ProtoMessage() {}
+
+func (x *ConvBrief) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConvBrief.ProtoReflect.Descriptor instead.
+func (*ConvBrief) Descriptor() ([]byte, []int) {
+	return file_protocol_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ConvBrief) GetConvId() string {
+	if x != nil {
+		return x.ConvId
+	}
+	return ""
+}
+
+func (x *ConvBrief) GetConvType() int32 {
+	if x != nil {
+		return x.ConvType
+	}
+	return 0
+}
+
+func (x *ConvBrief) GetMaxSeq() int64 {
+	if x != nil {
+		return x.MaxSeq
+	}
+	return 0
+}
+
+func (x *ConvBrief) GetUnread() int32 {
+	if x != nil {
+		return x.Unread
+	}
+	return 0
+}
+
+// SYNC_NOTIFY 推送体（S→C：上线后有未读会话时下发，客户端据此发起 SYNC_PULL）
+type SyncNotifyReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Convs         []*ConvBrief           `protobuf:"bytes,1,rep,name=convs,proto3" json:"convs,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SyncNotifyReq) Reset() {
+	*x = SyncNotifyReq{}
+	mi := &file_protocol_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SyncNotifyReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SyncNotifyReq) ProtoMessage() {}
+
+func (x *SyncNotifyReq) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SyncNotifyReq.ProtoReflect.Descriptor instead.
+func (*SyncNotifyReq) Descriptor() ([]byte, []int) {
+	return file_protocol_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SyncNotifyReq) GetConvs() []*ConvBrief {
+	if x != nil {
+		return x.Convs
+	}
+	return nil
+}
+
 // RECALL 请求体 (cmd=0x0B)
 type MsgRecallReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -709,7 +823,7 @@ type MsgRecallReq struct {
 
 func (x *MsgRecallReq) Reset() {
 	*x = MsgRecallReq{}
-	mi := &file_protocol_proto_msgTypes[10]
+	mi := &file_protocol_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -721,7 +835,7 @@ func (x *MsgRecallReq) String() string {
 func (*MsgRecallReq) ProtoMessage() {}
 
 func (x *MsgRecallReq) ProtoReflect() protoreflect.Message {
-	mi := &file_protocol_proto_msgTypes[10]
+	mi := &file_protocol_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -734,7 +848,7 @@ func (x *MsgRecallReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgRecallReq.ProtoReflect.Descriptor instead.
 func (*MsgRecallReq) Descriptor() ([]byte, []int) {
-	return file_protocol_proto_rawDescGZIP(), []int{10}
+	return file_protocol_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *MsgRecallReq) GetConvId() string {
@@ -806,7 +920,14 @@ const file_protocol_proto_rawDesc = "" +
 	"\aconv_id\x18\x01 \x01(\tR\x06convId\x121\n" +
 	"\bmessages\x18\x02 \x03(\v2\x15.linkim.pb.v1.MsgPushR\bmessages\x12\x17\n" +
 	"\amax_seq\x18\x03 \x01(\x03R\x06maxSeq\x12\x12\n" +
-	"\x04code\x18\x04 \x01(\x05R\x04code\">\n" +
+	"\x04code\x18\x04 \x01(\x05R\x04code\"r\n" +
+	"\tConvBrief\x12\x17\n" +
+	"\aconv_id\x18\x01 \x01(\tR\x06convId\x12\x1b\n" +
+	"\tconv_type\x18\x02 \x01(\x05R\bconvType\x12\x17\n" +
+	"\amax_seq\x18\x03 \x01(\x03R\x06maxSeq\x12\x16\n" +
+	"\x06unread\x18\x04 \x01(\x05R\x06unread\">\n" +
+	"\rSyncNotifyReq\x12-\n" +
+	"\x05convs\x18\x01 \x03(\v2\x17.linkim.pb.v1.ConvBriefR\x05convs\">\n" +
 	"\fMsgRecallReq\x12\x17\n" +
 	"\aconv_id\x18\x01 \x01(\tR\x06convId\x12\x15\n" +
 	"\x06msg_id\x18\x02 \x01(\tR\x05msgIdB!Z\x1fgithub.com/linkim/linkim/pkg/pbb\x06proto3"
@@ -823,7 +944,7 @@ func file_protocol_proto_rawDescGZIP() []byte {
 	return file_protocol_proto_rawDescData
 }
 
-var file_protocol_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_protocol_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_protocol_proto_goTypes = []any{
 	(*MsgSendReq)(nil),     // 0: linkim.pb.v1.MsgSendReq
 	(*MsgSendAck)(nil),     // 1: linkim.pb.v1.MsgSendAck
@@ -835,15 +956,18 @@ var file_protocol_proto_goTypes = []any{
 	(*KickReq)(nil),        // 7: linkim.pb.v1.KickReq
 	(*SyncPullReq)(nil),    // 8: linkim.pb.v1.SyncPullReq
 	(*SyncResp)(nil),       // 9: linkim.pb.v1.SyncResp
-	(*MsgRecallReq)(nil),   // 10: linkim.pb.v1.MsgRecallReq
+	(*ConvBrief)(nil),      // 10: linkim.pb.v1.ConvBrief
+	(*SyncNotifyReq)(nil),  // 11: linkim.pb.v1.SyncNotifyReq
+	(*MsgRecallReq)(nil),   // 12: linkim.pb.v1.MsgRecallReq
 }
 var file_protocol_proto_depIdxs = []int32{
-	2, // 0: linkim.pb.v1.SyncResp.messages:type_name -> linkim.pb.v1.MsgPush
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	2,  // 0: linkim.pb.v1.SyncResp.messages:type_name -> linkim.pb.v1.MsgPush
+	10, // 1: linkim.pb.v1.SyncNotifyReq.convs:type_name -> linkim.pb.v1.ConvBrief
+	2,  // [2:2] is the sub-list for method output_type
+	2,  // [2:2] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_protocol_proto_init() }
@@ -857,7 +981,7 @@ func file_protocol_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protocol_proto_rawDesc), len(file_protocol_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

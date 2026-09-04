@@ -245,6 +245,11 @@ func (s *Server) handleAuth(c *Conn, frame protocol.Frame) {
 	c.replyAck(protocol.CmdAuthAck, frame.Seq, mustMarshal(&pb.AuthAck{Code: 0, Msg: "ok", Uid: uid}))
 	s.logger.Info("conn authenticated",
 		zap.Int64("uid", uid), zap.String("device", c.deviceID), zap.Int32("platform", c.platform))
+
+	// 上线补拉（S8）：异步下发未读会话 SYNC_NOTIFY，不阻塞 AUTH_ACK。
+	if s.logic != nil {
+		NotifyOnline(s.logic, s.logger, c, c.platform)
+	}
 }
 
 // kickSamePlatform 踢掉同 uid 同 platform 的其他设备连接。

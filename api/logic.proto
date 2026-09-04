@@ -23,8 +23,15 @@ service Logic {
   // S7 实现：接收端已投递回执（观测用）。
   rpc ReportDelivered(ReportDeliveredReq) returns (Empty);
 
-  // 上下线事件（Comet AUTH 成功/断连时上报）。
-  rpc OnlineEvent(OnlineEventReq) returns (Empty);
+  // S8 实现：上下线事件。上线时返回该用户有未读增量的会话列表
+  //（复用 ConvBrief，comet 组装 SYNC_NOTIFY 帧推给刚上线的连接）。
+  rpc OnlineEvent(OnlineEventReq) returns (PendingResp);
+
+  // S8 实现：查询 uid 的未读会话列表（last_seq > read_seq）。
+  rpc GetPendingConvs(PendingReq) returns (PendingResp);
+
+  // S8 实现：已读上报，推进 read_seq 游标并扣减未读。
+  rpc MarkRead(MarkReadReq) returns (Empty);
 }
 
 message VerifyTokenReq {
@@ -89,3 +96,18 @@ message OnlineEventReq {
 }
 
 message Empty {}
+
+message PendingReq {
+  int64 uid = 1;
+}
+
+message PendingResp {
+  // 复用客户端协议的 ConvBrief，避免与 pkg/pb 中同名消息冲突。
+  repeated linkim.pb.v1.ConvBrief convs = 1;
+}
+
+message MarkReadReq {
+  int64 uid = 1;
+  string conv_id = 2;
+  int64 seq = 3; // 已读到的会话 seq（新游标）
+}
