@@ -124,6 +124,7 @@ func (w *StoreWorker) flush(ctx context.Context, items []storeItem) {
 	if len(items) == 0 {
 		return
 	}
+	start := time.Now()
 	if err := retryExec(ctx, storeMaxRetry, storeRetryBase, func() error {
 		return w.writeBatch(ctx, items)
 	}); err != nil {
@@ -131,6 +132,8 @@ func (w *StoreWorker) flush(ctx context.Context, items []storeItem) {
 			zap.Int("count", len(items)), zap.Error(err))
 		w.dlq(ctx, items)
 	}
+	storeBatchDuration.Observe(time.Since(start).Seconds())
+	storeRowsTotal.Add(float64(len(items)))
 	// 成功或已入 DLQ 均提交 offset，避免毒消息死循环（设计文档 6.1 ④）。
 	w.commitBatch(ctx, items)
 	w.logger.Debug("store batch flushed", zap.Int("count", len(items)))

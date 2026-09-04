@@ -91,6 +91,7 @@ func (w *PushWorker) Handle(ctx context.Context, km kafka.Message) error {
 		return nil
 	}
 	if len(route) == 0 {
+		pushTotal.WithLabelValues("offline").Inc()
 		w.logger.Info("receiver offline, rely on sync pull",
 			zap.Int64("uid", recv), zap.String("msg_id", msg.GetMsgId()))
 		return nil
@@ -106,6 +107,7 @@ func (w *PushWorker) Handle(ctx context.Context, km kafka.Message) error {
 	for field, addr := range route {
 		device := deviceOfField(field)
 		if exists, err := w.rdb.Exists(ctx, redisx.CometAliveKey(addr)).Result(); err != nil || exists == 0 {
+			pushTotal.WithLabelValues("comet_not_alive").Inc()
 			w.logger.Warn("target comet not alive, skip group",
 				zap.String("addr", addr), zap.Error(err))
 			continue
@@ -126,8 +128,10 @@ func (w *PushWorker) pushToOne(ctx context.Context, addr string, uid int64, devi
 	for attempt := 1; attempt <= 2; attempt++ {
 		resp, err := client.PushFrames(ctx, req)
 		if err == nil {
+			pushTotal.WithLabelValues("ok").Inc()
 			if !resp.GetOnline() {
 				// 连接刚断开：不重试（设计文档 6.1 ⑤）。
+				pushTotal.WithLabelValues("not_online").Inc()
 				w.logger.Info("target not online on comet, skip",
 					zap.String("addr", addr), zap.Int64("uid", uid), zap.String("device", device))
 			}
@@ -138,6 +142,7 @@ func (w *PushWorker) pushToOne(ctx context.Context, addr string, uid int64, devi
 				zap.String("addr", addr), zap.Error(err))
 			continue
 		}
+		pushTotal.WithLabelValues("failed").Inc()
 		w.logger.Error("push failed after retry, rely on sync pull",
 			zap.String("addr", addr), zap.String("msg_id", msg.GetMsgId()), zap.Error(err))
 	}

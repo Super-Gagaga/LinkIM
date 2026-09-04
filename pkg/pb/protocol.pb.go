@@ -865,6 +865,52 @@ func (x *MsgRecallReq) GetMsgId() string {
 	return ""
 }
 
+// RECONNECT_NOW 推送体 (cmd=0x0D)：comet drain 时通知客户端立即重连
+// （jitter 防雪崩，设计文档 12.2）
+type ReconnectReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JitterMs      int32                  `protobuf:"varint,1,opt,name=jitter_ms,json=jitterMs,proto3" json:"jitter_ms,omitempty"` // 客户端重连前随机等待时长
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReconnectReq) Reset() {
+	*x = ReconnectReq{}
+	mi := &file_protocol_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReconnectReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReconnectReq) ProtoMessage() {}
+
+func (x *ReconnectReq) ProtoReflect() protoreflect.Message {
+	mi := &file_protocol_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReconnectReq.ProtoReflect.Descriptor instead.
+func (*ReconnectReq) Descriptor() ([]byte, []int) {
+	return file_protocol_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ReconnectReq) GetJitterMs() int32 {
+	if x != nil {
+		return x.JitterMs
+	}
+	return 0
+}
+
 var File_protocol_proto protoreflect.FileDescriptor
 
 const file_protocol_proto_rawDesc = "" +
@@ -930,7 +976,9 @@ const file_protocol_proto_rawDesc = "" +
 	"\x05convs\x18\x01 \x03(\v2\x17.linkim.pb.v1.ConvBriefR\x05convs\">\n" +
 	"\fMsgRecallReq\x12\x17\n" +
 	"\aconv_id\x18\x01 \x01(\tR\x06convId\x12\x15\n" +
-	"\x06msg_id\x18\x02 \x01(\tR\x05msgIdB!Z\x1fgithub.com/linkim/linkim/pkg/pbb\x06proto3"
+	"\x06msg_id\x18\x02 \x01(\tR\x05msgId\"+\n" +
+	"\fReconnectReq\x12\x1b\n" +
+	"\tjitter_ms\x18\x01 \x01(\x05R\bjitterMsB!Z\x1fgithub.com/linkim/linkim/pkg/pbb\x06proto3"
 
 var (
 	file_protocol_proto_rawDescOnce sync.Once
@@ -944,7 +992,7 @@ func file_protocol_proto_rawDescGZIP() []byte {
 	return file_protocol_proto_rawDescData
 }
 
-var file_protocol_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_protocol_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_protocol_proto_goTypes = []any{
 	(*MsgSendReq)(nil),     // 0: linkim.pb.v1.MsgSendReq
 	(*MsgSendAck)(nil),     // 1: linkim.pb.v1.MsgSendAck
@@ -959,6 +1007,7 @@ var file_protocol_proto_goTypes = []any{
 	(*ConvBrief)(nil),      // 10: linkim.pb.v1.ConvBrief
 	(*SyncNotifyReq)(nil),  // 11: linkim.pb.v1.SyncNotifyReq
 	(*MsgRecallReq)(nil),   // 12: linkim.pb.v1.MsgRecallReq
+	(*ReconnectReq)(nil),   // 13: linkim.pb.v1.ReconnectReq
 }
 var file_protocol_proto_depIdxs = []int32{
 	2,  // 0: linkim.pb.v1.SyncResp.messages:type_name -> linkim.pb.v1.MsgPush
@@ -981,7 +1030,7 @@ func file_protocol_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protocol_proto_rawDesc), len(file_protocol_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

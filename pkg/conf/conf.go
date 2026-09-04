@@ -19,6 +19,7 @@ type ServerConfig struct {
 	WSPort        int    `mapstructure:"ws_port"`
 	NodeID        int64  `mapstructure:"node_id"`        // snowflake 节点 ID，集群内唯一
 	AdvertiseAddr string `mapstructure:"advertise_addr"` // 对外可达的 gRPC 地址（写入路由表），如 10.0.1.12:9000
+	MetricsPort   int    `mapstructure:"metrics_port"`   // /metrics 端口（0=不启用独立监听；comet/account 复用业务端口）
 }
 
 // MySQLConfig 定义 MySQL DSN 与连接池调优参数。
@@ -130,6 +131,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.ws_port", 0)
 	v.SetDefault("server.node_id", 0)
 	v.SetDefault("server.advertise_addr", "")
+	v.SetDefault("server.metrics_port", 0)
 
 	v.SetDefault("mysql.dsn", "")
 	v.SetDefault("mysql.max_open_conns", 64)

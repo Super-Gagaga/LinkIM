@@ -1,0 +1,46 @@
+# job：Kafka 消费者（与分区数联动扩容），HPA 按 CPU 70%。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: job
+  namespace: linkim
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: job }
+  template:
+    metadata:
+      labels: { app: job }
+    spec:
+      containers:
+        - name: job
+          image: linkim/job:latest
+          args: ["-conf", "/etc/linkim/job.yaml"]
+          ports:
+            - { name: metrics, containerPort: 9092 }
+          volumeMounts:
+            - { name: config, mountPath: /etc/linkim }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: "1", memory: 512Mi }
+      volumes:
+        - name: config
+          configMap: { name: linkim-config }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: job
+  namespace: linkim
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: job
+  minReplicas: 2
+  maxReplicas: 16
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }

@@ -1,0 +1,21 @@
+# 全链路部署的 Prometheus 抓取配置（docker-compose-all 内网地址）。
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: linkim-account
+    static_configs:
+      - targets: ["account:8080"]
+  - job_name: linkim-comet
+    static_configs:
+      - targets: ["comet-1:8081", "comet-2:8081"]
+  - job_name: linkim-logic
+    static_configs:
+      - targets: ["logic-1:9091", "logic-2:9091"]
+  - job_name: linkim-job
+    static_configs:
+      - targets: ["job:9092"]
+  - job_name: kafka-exporter
+    static_configs:
+      - targets: ["kafka-exporter:9308"]

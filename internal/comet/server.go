@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"sync"
 	"time"
@@ -92,6 +93,7 @@ func (s *Server) StartBackground() (stop func()) {
 				case <-done:
 					return
 				case <-ticker.C:
+					onlineGauge.Set(float64(s.OnlineCount()))
 					for _, c := range b.idleConns(s.nowSec(), int64(idleTimeout.Seconds())) {
 						s.logger.Info("kick idle connection",
 							zap.Int64("uid", c.UID()), zap.String("device", c.deviceID))
@@ -163,6 +165,7 @@ func (c *Conn) readLoop() {
 			return
 		}
 		c.Touch()
+		frameReceived(protocol.CmdString(frame.Cmd))
 
 		if !c.authed.Load() {
 			if frame.Cmd != protocol.CmdAuth {
@@ -211,12 +214,14 @@ func (s *Server) handleAuth(c *Conn, frame protocol.Frame) {
 		if err == nil {
 			code = resp.GetCode()
 		}
+		authTotal.WithLabelValues("fail").Inc()
 		s.logger.Info("auth failed", zap.String("device", req.GetDeviceId()), zap.Error(err))
 		c.replyAck(protocol.CmdAuthAck, frame.Seq, mustMarshal(&pb.AuthAck{Code: code, Msg: "verify failed"}))
 		c.Close()
 		return
 	}
 
+	authTotal.WithLabelValues("success").Inc()
 	uid := resp.GetUid()
 	c.setIdentity(uid, req.GetDeviceId(), req.GetPlatform())
 
@@ -320,6 +325,7 @@ func (c *Conn) writeLoop() {
 			}
 		case <-ticker.C:
 			if c.checkSlow(s.nowMs()) {
+				slowKickTotal.Inc()
 				s.logger.Warn("kick slow consumer", zap.Int64("uid", c.UID()), zap.String("device", c.deviceID))
 				c.Close()
 				return
@@ -338,6 +344,7 @@ func (c *Conn) replyAck(cmd protocol.Cmd, seq uint32, body []byte) {
 	if err != nil {
 		return
 	}
+	frameSent(protocol.CmdString(cmd))
 	_ = c.Push(frame)
 }
 
@@ -409,4 +416,50 @@ func mustMarshal(m proto.Message) []byte {
 		return nil
 	}
 	return b
+}
+
+// OnlineCount 返回本机当前已鉴权在线连接数（全 bucket 聚合）。
+func (s *Server) OnlineCount() int {
+	n := 0
+	for _, b := range s.buckets {
+		n += b.size()
+	}
+	return n
+}
+
+// drainGrace 是 drain 广播后等待连接自行断开的最长时间（设计文档 12.2：30s）。
+const drainGrace = 30 * time.Second
+
+// Drain 优雅下线：向所有在线连接广播 RECONNECT_NOW（jitter 0~3000ms 随机），
+// 等待连接断开（全部断开或超时即止），返回仍在线的连接数。
+// 调用方应先摘除 comet:alive 存活标记（Alive.Stop），让 LB/路由停止导入流量。
+func (s *Server) Drain() int {
+	s.logger.Info("drain: broadcasting RECONNECT_NOW", zap.Int("online", s.OnlineCount()))
+	for _, b := range s.buckets {
+		b.mu.RLock()
+		for _, c := range b.conns {
+			jitter := rand.Int31n(3000)
+			body := mustMarshal(&pb.ReconnectReq{JitterMs: jitter})
+			if frame, err := protocol.Encode(protocol.Frame{
+				Ver: protocol.Ver, Cmd: protocol.CmdReconnectNow, Body: body,
+			}); err == nil {
+				frameSent("RECONNECT_NOW")
+				reconnectSentTotal.Inc()
+				_ = c.Push(frame)
+			}
+		}
+		b.mu.RUnlock()
+	}
+
+	deadline := time.Now().Add(drainGrace)
+	for time.Now().Before(deadline) {
+		if s.OnlineCount() == 0 {
+			s.logger.Info("drain: all connections closed early")
+			return 0
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	remaining := s.OnlineCount()
+	s.logger.Warn("drain: grace expired, connections remain", zap.Int("remaining", remaining))
+	return remaining
 }

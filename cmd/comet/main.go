@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -78,6 +80,7 @@ func main() {
 	// WebSocket 服务 :8081/ws。
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", srv.ServeWS)
+	mux.Handle("/metrics", promhttp.Handler())
 	wsSrv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Server.WSPort),
 		Handler:           mux,
@@ -116,8 +119,12 @@ func main() {
 	<-ctx.Done()
 	logger.Info("shutdown signal received, draining")
 
-	// 摘除存活标记 → 停后台扫描 → 关闭监听（连接 drain 由 S10 实现）。
+	// drain（12.2）：先摘存活标记（LB/路由停止导流）→ 广播 RECONNECT_NOW →
+	// 等连接自行断开（最多 30s）→ 关闭监听。
 	alive.Stop()
+	if remaining := srv.Drain(); remaining > 0 {
+		logger.Warn("drain grace expired, force closing", zap.Int("remaining", remaining))
+	}
 	stopScan()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

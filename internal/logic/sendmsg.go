@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -74,10 +75,18 @@ type idemValue struct {
 	Seq   int64  `json:"seq"`
 }
 
-// SendMsg 实现 gRPC Logic.SendMsg（设计文档 5.1 上行时序、11 节群扩散）：
-// 参数校验 → conv 规范化 → 幂等 → 关系校验（好友/群成员）→ seq → msgId →
-// 写 Kafka（store 单份；push 按接收者扇出 Envelope）→ ACK。
+// SendMsg 实现 gRPC Logic.SendMsg，外层记录耗时与业务码指标。
 func (s *Server) SendMsg(ctx context.Context, req *pb.SendMsgReq) (*pb.SendMsgAck, error) {
+	start := time.Now()
+	ack, err := s.sendMsg(ctx, req)
+	sendMsgDuration.Observe(time.Since(start).Seconds())
+	sendMsgTotal.WithLabelValues(strconv.Itoa(int(ack.GetCode()))).Inc()
+	return ack, err
+}
+
+// sendMsg 上行处理主流程（设计文档 5.1、11 节群扩散）：
+// 参数校验 → conv 规范化 → 幂等 → 关系校验 → seq → msgId → 写 Kafka → ACK。
+func (s *Server) sendMsg(ctx context.Context, req *pb.SendMsgReq) (*pb.SendMsgAck, error) {
 	// 1. 参数校验。
 	if req.GetSenderId() <= 0 || req.GetClientMsgId() == "" || req.GetMsgType() <= 0 {
 		return &pb.SendMsgAck{Code: CodeBadParam}, nil
@@ -265,6 +274,7 @@ func (s *Server) replayOrBusy(ctx context.Context, idemKey string) (*pb.SendMsgA
 		s.logger.Warn("idem value corrupt", zap.String("key", idemKey), zap.Error(err))
 		return &pb.SendMsgAck{Code: CodeRedisErr}, nil
 	}
+	idemHitTotal.Inc()
 	s.logger.Info("msg idempotent replay",
 		zap.String("key", idemKey), zap.String("msg_id", iv.MsgID), zap.Int64("seq", iv.Seq))
 	return &pb.SendMsgAck{Code: 0, MsgId: iv.MsgID, Seq: iv.Seq, Timestamp: time.Now().UnixMilli()}, nil

@@ -1,0 +1,244 @@
+# LinkIM 全链路一键部署：依赖 + 四服务（comet×2/logic×2）+ 监控栈。
+# 用法：make run-all（等价 docker compose -f deployments/docker-compose-all.yml up -d --build --wait）
+# 宿主机端口：account 18080 / comet-1 18081 / comet-2 18082 / prometheus 19090 / grafana 13000。
+# 容器间通过服务名互访（mysql:3306 / redis:6379 / kafka:29092 / logic:9001）。
+
+x-app-base: &app-base
+  restart: unless-stopped
+  depends_on:
+    mysql:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+
+services:
+  # ---------- 基础依赖 ----------
+  mysql:
+    image: mysql:8
+    container_name: linkim-mysql
+    ports:
+      - "23306:3306" # 供 bench/dlqreplay 等宿主机工具访问
+    environment:
+      MYSQL_ROOT_PASSWORD: linkim123
+      MYSQL_DATABASE: linkim
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -plinkim123 --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 15s
+
+  redis:
+    image: redis:7
+    container_name: linkim-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: linkim-kafka
+    hostname: kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: INTERNAL://kafka:29092,CONTROLLER://kafka:29093,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+
+  kafka-init:
+    image: apache/kafka:3.7.0
+    container_name: linkim-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        BS="kafka:29092"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic msg.push     --partitions 64  --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic msg.store    --partitions 128 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic msg.notify   --partitions 8   --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic presence     --partitions 8   --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic group.event --partitions 8   --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic dlq.msg.push --partitions 4   --replication-factor 1
+        echo "all topics ready"
+
+  # ---------- 业务服务 ----------
+  account:
+    <<: *app-base
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+      args: { SVC: account }
+    image: linkim/account:latest
+    container_name: linkim-account
+    ports:
+      - "18080:8080"
+    environment: &app-env
+      LINKIM_MYSQL_DSN: "root:linkim123@tcp(mysql:3306)/linkim?charset=utf8mb4&parseTime=true&loc=Local"
+      LINKIM_REDIS_ADDR: "redis:6379"
+      LINKIM_KAFKA_BROKERS: "kafka:29092"
+      LINKIM_LOG_LEVEL: info
+      LINKIM_LOG_FORMAT: json
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      kafka-init: { condition: service_completed_successfully }
+
+  migrate:
+    image: migrate/migrate
+    container_name: linkim-migrate
+    depends_on:
+      mysql: { condition: service_healthy }
+    volumes:
+      - ../migrations:/migrations
+    command:
+      ["-path", "/migrations", "-database",
+       "mysql://root:linkim123@tcp(mysql:3306)/linkim?multiStatements=true", "up"]
+    restart: "no"
+
+  logic-1: &logic-svc
+    <<: *app-base
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+      args: { SVC: logic }
+    image: linkim/logic:latest
+    container_name: linkim-logic-1
+    command: ["-conf", "configs/logic.yaml"]
+    environment:
+      <<: *app-env
+      LINKIM_ACCOUNT_ADDR: "http://account:8080"
+    networks:
+      default:
+        aliases: ["logic"] # DNS 轮询负载均衡
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      kafka-init: { condition: service_completed_successfully }
+      account: { condition: service_started }
+
+  logic-2:
+    <<: *logic-svc
+    container_name: linkim-logic-2
+
+  comet-1: &comet-svc
+    <<: *app-base
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+      args: { SVC: comet }
+    image: linkim/comet:latest
+    container_name: linkim-comet-1
+    command: ["-conf", "configs/comet.yaml"]
+    ports:
+      - "18081:8081"
+    environment:
+      <<: *app-env
+      LINKIM_LOGIC_ADDR: "logic:9001"
+      LINKIM_SERVER_ADVERTISE_ADDR: "comet-1:9000"
+    depends_on:
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      kafka-init: { condition: service_completed_successfully }
+      account: { condition: service_started }
+      logic-1: { condition: service_started }
+
+  comet-2:
+    <<: *comet-svc
+    container_name: linkim-comet-2
+    ports:
+      - "18082:8081"
+    environment:
+      <<: *app-env
+      LINKIM_LOGIC_ADDR: "logic:9001"
+      LINKIM_SERVER_ADVERTISE_ADDR: "comet-2:9000"
+
+  job:
+    <<: *app-base
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+      args: { SVC: job }
+    image: linkim/job:latest
+    container_name: linkim-job
+    command: ["-conf", "configs/job.yaml"]
+    environment:
+      <<: *app-env
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      kafka-init: { condition: service_completed_successfully }
+
+  # ---------- 监控栈 ----------
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: linkim-kafka-exporter
+    depends_on:
+      kafka: { condition: service_healthy }
+    environment:
+      KAFKA_URI: kafka:29092
+    ports:
+      - "19308:9308"
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: linkim-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "19090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: linkim-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: linkim
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+    volumes:
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/dashboards/provider.yml:/etc/grafana/provisioning/dashboards/provider.yml:ro
+      - ./grafana/linkim.json:/var/lib/grafana/dashboards/linkim.json:ro
+    ports:
+      - "13000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  redis-data:
+  kafka-data:

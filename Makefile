@@ -8,7 +8,7 @@ COMPOSE_FILE := deployments/docker-compose.yml
 # golang-migrate 的 MySQL DSN（S2 起使用；multiStatements 支持多语句迁移脚本）
 MYSQL_DSN ?= mysql://root:linkim123@tcp(127.0.0.1:23306)/linkim?multiStatements=true
 
-.PHONY: help build test lint proto migrate-up migrate-down compose-up compose-down clean
+.PHONY: help build test lint proto migrate-up migrate-down compose-up compose-down run-all down-all clean
 
 help: ## 显示所有可用目标
 	@echo "Usage: make <target>"
@@ -53,6 +53,12 @@ compose-up: ## 启动本地依赖 MySQL/Redis/Kafka 并等待 healthy
 
 compose-down: ## 停止并移除依赖容器（保留数据卷）
 	docker compose -f $(COMPOSE_FILE) down
+
+run-all: ## 一键起全链路（依赖+四服务+监控栈，docker compose 构建）
+	docker compose -f deployments/docker-compose-all.yml up -d --build --wait --wait-timeout 600
+
+down-all: ## 停止并清理全链路（保留数据卷）
+	docker compose -f deployments/docker-compose-all.yml down
 
 clean: ## 清理构建产物
 	rm -rf $(BIN_DIR)

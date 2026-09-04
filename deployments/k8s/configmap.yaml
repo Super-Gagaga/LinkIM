@@ -1,0 +1,85 @@
+# 应用配置（由 configs/ 生成；生产建议改用 Secret 挂载敏感项）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: linkim-config
+  namespace: linkim
+data:
+  account.yaml: |
+    server:
+      name: account
+      http_port: 8080
+      node_id: 1
+    mysql:
+      dsn: "root:linkim123@tcp(mysql:3306)/linkim?charset=utf8mb4&parseTime=true&loc=Local"
+      max_open_conns: 64
+      max_idle_conns: 16
+      conn_max_lifetime: 5m
+    redis:
+      addr: "redis:6379"
+    kafka:
+      brokers: ["kafka:29092"]
+      client_id: "account"
+    jwt:
+      secret: "linkim-prod-secret-change-me"
+      access_ttl: 2h
+      refresh_ttl: 720h
+    log:
+      level: info
+      format: json
+  comet.yaml: |
+    server:
+      name: comet
+      ws_port: 8081
+      grpc_port: 9000
+      advertise_addr: "POD_IP_PLACEHOLDER:9000"
+    redis:
+      addr: "redis:6379"
+    kafka:
+      brokers: ["kafka:29092"]
+      client_id: "comet"
+    logic:
+      addr: "logic:9001"
+      call_timeout: 2s
+    log:
+      level: info
+      format: json
+  logic.yaml: |
+    server:
+      name: logic
+      grpc_port: 9001
+      metrics_port: 9091
+      node_id: 2
+    mysql:
+      dsn: "root:linkim123@tcp(mysql:3306)/linkim?charset=utf8mb4&parseTime=true&loc=Local"
+    redis:
+      addr: "redis:6379"
+    kafka:
+      brokers: ["kafka:29092"]
+      client_id: "logic"
+    account:
+      addr: "http://account:8080"
+      verify_timeout: 1s
+    log:
+      level: info
+      format: json
+  job.yaml: |
+    server:
+      name: job
+      metrics_port: 9092
+    mysql:
+      dsn: "root:linkim123@tcp(mysql:3306)/linkim?charset=utf8mb4&parseTime=true&loc=Local"
+    redis:
+      addr: "redis:6379"
+    kafka:
+      brokers: ["kafka:29092"]
+      client_id: "job"
+    consumer:
+      push_group: "job-push"
+      store_group: "job-store"
+      min_bytes: 1
+      max_bytes: 1048576
+      read_backoff_max: 2s
+    log:
+      level: info
+      format: json

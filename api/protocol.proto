@@ -111,3 +111,9 @@ message MsgRecallReq {
   string conv_id = 1;
   string msg_id = 2;
 }
+
+// RECONNECT_NOW 推送体 (cmd=0x0D)：comet drain 时通知客户端立即重连
+//（jitter 防雪崩，设计文档 12.2）
+message ReconnectReq {
+  int32 jitter_ms = 1; // 客户端重连前随机等待时长
+}

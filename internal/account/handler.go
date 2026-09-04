@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
 
@@ -36,6 +37,7 @@ func NewRouter(h *Handler) *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/groups/{gid}/members", h.jwtAuth(h.handleListMembers))
 	mux.HandleFunc("POST /api/v1/groups/{gid}/members", h.jwtAuth(h.handleAddMember))
 	mux.HandleFunc("DELETE /api/v1/groups/{gid}/members/{uid}", h.jwtAuth(h.handleRemoveMember))
+	mux.Handle("/metrics", promhttp.Handler())
 	return mux
 }
 

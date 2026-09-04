@@ -1,0 +1,11 @@
+# Grafana 看板自动装配。
+apiVersion: 1
+providers:
+  - name: linkim
+    orgId: 1
+    folder: LinkIM
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

@@ -3,6 +3,9 @@
 package main
 
 import (
+	"fmt"
+	"net/http"
+
 	"context"
 	"flag"
 	"log"
@@ -10,6 +13,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/segmentio/kafka-go"
 	"go.uber.org/zap"
@@ -53,7 +58,19 @@ func main() {
 
 	producer := kafkax.NewProducer(cfg.Kafka)
 
+	if cfg.Server.MetricsPort > 0 {
+		go func() {
+			mux := http.NewServeMux()
+			mux.Handle("/metrics", promhttp.Handler())
+			if err := http.ListenAndServe(fmt.Sprintf(":%d", cfg.Server.MetricsPort), mux); err != nil {
+				logger.Error("metrics serve failed", zap.Error(err))
+			}
+		}()
+	}
+
+	// 路由对账（设计文档 7.2：每 5min 清理失联 comet 的残留路由）。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	go job.NewReconciler(rdb, logger).Run(ctx)
 	defer stop()
 
 	// job-push：在线投递。

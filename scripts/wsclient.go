@@ -1,4 +1,5 @@
-// wsclient 是 LinkIM 命令行测试客户端：自动 AUTH + 周期心跳 + 打印收到的所有帧。
+// wsclient 是 LinkIM 命令行测试客户端：自动 AUTH + 周期心跳 + 打印收到的所有帧，
+// 收到 RECONNECT_NOW（comet drain）后按 jitter 抖动重连（复用同 token/device）。
 // 用法示例：
 //
 //	go run ./scripts/wsclient.go -addr ws://127.0.0.1:8081/ws \
@@ -32,44 +33,83 @@ var (
 	platform = flag.Int("platform", 1, "平台：1手机 2平板 3桌面 4Web")
 	beat     = flag.Duration("interval", 30*time.Second, "心跳发送间隔")
 	sendTxt  = flag.String("send", "", "发送一条文本消息后继续收帧（空=不发）")
-	peer     = flag.Int64("peer", 0, "消息接收方 uid（与 -send 配合，必填）")
+	peer     = flag.Int64("peer", 0, "消息接收方 uid（与 -send 配合）")
 	cmid     = flag.String("cmid", "", "指定 client_msg_id（缺省随机；幂等重发实验用）")
 	sendN    = flag.Int("n", 1, "配合 -send 发送的条数")
 	sendGap  = flag.Duration("gap", 300*time.Millisecond, "多条发送间隔")
 	convFlag = flag.String("conv", "", "指定会话 ID 发送（g: 前缀为群聊；空则用 -peer 单聊）")
 )
 
+var writeMu sync.Mutex // gorilla 并发写不安全，串行化所有帧写出
+
+// inReconnect 标记处于 drain 重连流程（允许连接失败重试）。
+var inReconnect bool
+
 func main() {
 	flag.Parse()
 	if *token == "" || *uidFlag == 0 {
 		log.Fatal("必须提供 -token 与 -uid")
 	}
+	if *sendTxt != "" && *peer == 0 && *convFlag == "" {
+		log.Fatal("发送消息必须提供 -peer 或 -conv")
+	}
 
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
-	ws, _, err := websocket.DefaultDialer.Dial(*addr, nil)
-	if err != nil {
-		log.Fatalf("连接 %s 失败: %v", *addr, err)
+	for {
+		reconnect, jitter, exited := runSession(interrupt)
+		if exited {
+			return
+		}
+		if reconnect {
+			fmt.Printf("[drain] 收到 RECONNECT_NOW，抖动 %dms 后重连 %s\n", jitter, *addr)
+			time.Sleep(time.Duration(jitter) * time.Millisecond)
+			continue
+		}
+		return
 	}
+}
+
+// runSession 跑一次完整连接生命周期。
+// 返回：是否因 RECONNECT_NOW 重连、抖动毫秒、是否正常退出。
+func runSession(interrupt chan os.Signal) (reconnect bool, jitter int32, exited bool) {
+	// 首连失败立即退出；drain 重连期间（服务可能在滚动重启）带退避重试。
+	var ws *websocket.Conn
+	for attempt := 0; ; attempt++ {
+		conn, _, err := websocket.DefaultDialer.Dial(*addr, nil)
+		if err == nil {
+			ws = conn
+			break
+		}
+		if attempt == 0 && !inReconnect {
+			log.Fatalf("连接 %s 失败: %v", *addr, err)
+		}
+		if attempt >= 8 {
+			fmt.Printf("[conn] 重连放弃: %v\n", err)
+			return false, 0, true
+		}
+		time.Sleep(time.Duration(500*(attempt+1)) * time.Millisecond)
+	}
+	inReconnect = true
 	defer func() { _ = ws.Close() }()
 	ws.SetReadLimit(128 * 1024)
 
 	seq := uint32(0)
 	nextSeq := func() uint32 { seq++; return seq }
 
-	// AUTH
 	send(ws, protocol.CmdAuth, nextSeq(), &pb.AuthReq{
 		Token: *token, DeviceId: *device, Platform: int32(*platform), Uid: *uidFlag,
 	})
 
-	// 心跳
 	heartbeat := time.NewTicker(*beat)
 	defer heartbeat.Stop()
 
 	errCh := make(chan error, 1)
-	dedup := newLRU(1024)          // 按 msg_id 去重（模拟真实客户端，网络重试可能重复推送）
+	reconnectCh := make(chan int32, 1)
+	dedup := newLRU(1024)          // 按 msg_id 去重（网络重试可能重复推送）
 	syncSeqs := map[string]int64{} // conv -> 本地最大 seq（补拉游标）
+
 	go func() {
 		for {
 			mt, data, err := ws.ReadMessage()
@@ -99,11 +139,16 @@ func main() {
 					}
 				}
 			case protocol.CmdSyncNotify:
-				// 上线未读通知：逐会话循环 SYNC_PULL 直到追平 max_seq，
-				// 完成后用 MSG_RECEIVED_ACK 上报 MarkRead（设计文档 10.2）。
 				var n pb.SyncNotifyReq
 				if proto.Unmarshal(frame.Body, &n) == nil {
 					catchUp(ws, nextSeq, syncSeqs, n.GetConvs()) // 必须在读循环内同步执行（独占读）
+				}
+			case protocol.CmdReconnectNow:
+				var r pb.ReconnectReq
+				_ = proto.Unmarshal(frame.Body, &r)
+				select {
+				case reconnectCh <- r.GetJitterMs():
+				default:
 				}
 			}
 			describe(frame)
@@ -112,9 +157,6 @@ func main() {
 
 	// AUTH_ACK 到达后再发消息（简单等待：固定短暂延迟）。
 	if *sendTxt != "" {
-		if *peer == 0 && *convFlag == "" {
-			log.Fatal("发送消息必须提供 -peer 或 -conv")
-		}
 		go func() {
 			time.Sleep(500 * time.Millisecond) // 等待 AUTH_ACK
 			conv := *convFlag
@@ -147,17 +189,143 @@ func main() {
 		select {
 		case <-heartbeat.C:
 			send(ws, protocol.CmdHeartbeat, nextSeq(), &pb.HeartbeatReq{})
+		case j := <-reconnectCh:
+			fmt.Println("[conn] 服务端要求重连")
+			return true, j, false
 		case err := <-errCh:
 			fmt.Printf("[conn] 连接关闭: %v\n", err)
-			return
+			return false, 0, true
 		case <-interrupt:
 			fmt.Println("[conn] Ctrl+C，主动断开")
 			writeMu.Lock()
 			_ = ws.WriteMessage(websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.CloseNormalClosure, "bye"))
 			writeMu.Unlock()
-			return
+			return false, 0, true
 		}
+	}
+}
+
+// catchUp 逐会话按本地游标循环 SYNC_PULL(100) 直到追平 max_seq，
+// 全部完成后按会话最大 seq 发 MSG_RECEIVED_ACK（服务端据此 MarkRead）。
+func catchUp(ws *websocket.Conn, nextSeq func() uint32, syncSeqs map[string]int64, convs []*pb.ConvBrief) {
+	for _, cv := range convs {
+		local := syncSeqs[cv.GetConvId()]
+		got := 0
+		for round := 0; ; round++ {
+			if local >= cv.GetMaxSeq() {
+				break
+			}
+			send(ws, protocol.CmdSyncPull, nextSeq(), &pb.SyncPullReq{
+				ConvId: cv.GetConvId(), LocalMaxSeq: local, Limit: 100,
+			})
+			resp, err := readSyncResp(ws)
+			if err != nil {
+				fmt.Printf("[sync] conv=%s 拉取失败: %v\n", cv.GetConvId(), err)
+				return
+			}
+			for _, m := range resp.GetMessages() {
+				got++
+				if m.GetSeq() > local {
+					local = m.GetSeq()
+				}
+				fmt.Printf("[sync-msg] conv=%s seq=%d from=%d payload=%q\n",
+					m.GetConvId(), m.GetSeq(), m.GetSenderId(), string(m.GetPayload()))
+			}
+			syncSeqs[cv.GetConvId()] = local
+			if resp.GetMaxSeq() > cv.GetMaxSeq() {
+				cv.MaxSeq = resp.GetMaxSeq() // 服务端又来了新消息，继续追
+			}
+			if len(resp.GetMessages()) == 0 {
+				break
+			}
+		}
+		fmt.Printf("[sync] conv=%s got=%d local_max=%d target=%d\n",
+			cv.GetConvId(), got, local, cv.GetMaxSeq())
+		if local > 0 {
+			send(ws, protocol.CmdMsgReceivedAck, nextSeq(), &pb.ReceivedAckReq{
+				ConvId: cv.GetConvId(), Seq: local,
+			})
+		}
+	}
+}
+
+// readSyncResp 阻塞读取下一帧直到 SYNC_RESP（跳过交错的其他帧）。
+func readSyncResp(ws *websocket.Conn) (*pb.SyncResp, error) {
+	for i := 0; i < 64; i++ {
+		mt, data, err := ws.ReadMessage()
+		if err != nil {
+			return nil, err
+		}
+		if mt != websocket.BinaryMessage {
+			continue
+		}
+		frame, err := protocol.Decode(data)
+		if err != nil || frame.Cmd != protocol.CmdSyncResp {
+			continue
+		}
+		var resp pb.SyncResp
+		if err := proto.Unmarshal(frame.Body, &resp); err != nil {
+			return nil, err
+		}
+		return &resp, nil
+	}
+	return nil, fmt.Errorf("SYNC_RESP 未在有限帧内到达")
+}
+
+// send 编码一帧并发送。写失败（如 drain 瞬间连接关闭）不中断进程：
+// 读循环会感知断连并触发重连。
+func send(ws *websocket.Conn, cmd protocol.Cmd, seq uint32, msg proto.Message) {
+	body, err := proto.Marshal(msg)
+	if err != nil {
+		log.Fatalf("marshal %s 失败: %v", protocol.CmdString(cmd), err)
+	}
+	frame, err := protocol.Encode(protocol.Frame{Ver: protocol.Ver, Cmd: cmd, Seq: seq, Body: body})
+	if err != nil {
+		log.Fatalf("encode %s 失败: %v", protocol.CmdString(cmd), err)
+	}
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	if err := ws.WriteMessage(websocket.BinaryMessage, frame); err != nil {
+		fmt.Printf("[conn] 发送 %s 失败（连接关闭，将由读循环感知）: %v\n", protocol.CmdString(cmd), err)
+	}
+	fmt.Printf("[sent] %s seq=%d\n", protocol.CmdString(cmd), seq)
+}
+
+// describe 可读化打印收到的帧。
+func describe(f protocol.Frame) {
+	name := protocol.CmdString(f.Cmd)
+	switch f.Cmd {
+	case protocol.CmdAuthAck:
+		var m pb.AuthAck
+		if proto.Unmarshal(f.Body, &m) == nil {
+			fmt.Printf("[recv] %s seq=%d code=%d uid=%d kick_reason=%d msg=%q\n",
+				name, f.Seq, m.GetCode(), m.GetUid(), m.GetKickReason(), m.GetMsg())
+			if m.GetKickReason() != 0 || m.GetCode() == 40103 {
+				fmt.Println("[kick] *** KICKED：连接将被服务端关闭 ***")
+			}
+		}
+	case protocol.CmdHeartbeatAck:
+		fmt.Printf("[recv] %s seq=%d\n", name, f.Seq)
+	case protocol.CmdMsgSendAck:
+		var m pb.MsgSendAck
+		if proto.Unmarshal(f.Body, &m) == nil {
+			fmt.Printf("[recv] %s seq=%d code=%d client_msg_id=%s msg_id=%s seq(msg)=%d ts=%d\n",
+				name, f.Seq, m.GetCode(), m.GetClientMsgId(), m.GetMsgId(), m.GetSeq(), m.GetTimestamp())
+		}
+	case protocol.CmdMsgPush:
+		var m pb.MsgPush
+		if proto.Unmarshal(f.Body, &m) == nil {
+			fmt.Printf("[recv] %s seq(frame)=%d conv=%s msg_seq=%d from=%d payload=%q\n",
+				name, f.Seq, m.GetConvId(), m.GetSeq(), m.GetSenderId(), string(m.GetPayload()))
+		}
+	case protocol.CmdReconnectNow:
+		var m pb.ReconnectReq
+		if proto.Unmarshal(f.Body, &m) == nil {
+			fmt.Printf("[recv] %s jitter_ms=%d\n", name, m.GetJitterMs())
+		}
+	default:
+		fmt.Printf("[recv] %s seq=%d body=%dB\n", name, f.Seq, len(f.Body))
 	}
 }
 
@@ -202,124 +370,4 @@ func (l *lru) add(id string) bool {
 	l.seen[id] = struct{}{}
 	l.idx = (l.idx + 1) % l.cap
 	return true
-}
-
-var writeMu sync.Mutex // gorilla 并发写不安全，串行化所有帧写出
-
-// send 编码一帧并发送。
-func send(ws *websocket.Conn, cmd protocol.Cmd, seq uint32, msg proto.Message) {
-	body, err := proto.Marshal(msg)
-	if err != nil {
-		log.Fatalf("marshal %s 失败: %v", protocol.CmdString(cmd), err)
-	}
-	frame, err := protocol.Encode(protocol.Frame{Ver: protocol.Ver, Cmd: cmd, Seq: seq, Body: body})
-	if err != nil {
-		log.Fatalf("encode %s 失败: %v", protocol.CmdString(cmd), err)
-	}
-	writeMu.Lock()
-	defer writeMu.Unlock()
-	if err := ws.WriteMessage(websocket.BinaryMessage, frame); err != nil {
-		log.Fatalf("发送 %s 失败: %v", protocol.CmdString(cmd), err)
-	}
-	fmt.Printf("[sent] %s seq=%d\n", protocol.CmdString(cmd), seq)
-}
-
-// describe 可读化打印收到的帧。
-func describe(f protocol.Frame) {
-	name := protocol.CmdString(f.Cmd)
-	switch f.Cmd {
-	case protocol.CmdAuthAck:
-		var m pb.AuthAck
-		if proto.Unmarshal(f.Body, &m) == nil {
-			fmt.Printf("[recv] %s seq=%d code=%d uid=%d kick_reason=%d msg=%q\n",
-				name, f.Seq, m.GetCode(), m.GetUid(), m.GetKickReason(), m.GetMsg())
-			if m.GetKickReason() != 0 || m.GetCode() == 40103 {
-				fmt.Println("[kick] *** KICKED：连接将被服务端关闭 ***")
-			}
-		}
-	case protocol.CmdHeartbeatAck:
-		fmt.Printf("[recv] %s seq=%d\n", name, f.Seq)
-	case protocol.CmdMsgSendAck:
-		var m pb.MsgSendAck
-		if proto.Unmarshal(f.Body, &m) == nil {
-			fmt.Printf("[recv] %s seq=%d code=%d client_msg_id=%s msg_id=%s seq(msg)=%d ts=%d\n",
-				name, f.Seq, m.GetCode(), m.GetClientMsgId(), m.GetMsgId(), m.GetSeq(), m.GetTimestamp())
-		}
-	case protocol.CmdMsgPush:
-		var m pb.MsgPush
-		if proto.Unmarshal(f.Body, &m) == nil {
-			fmt.Printf("[recv] %s seq(frame)=%d conv=%s msg_seq=%d from=%d payload=%q\n",
-				name, f.Seq, m.GetConvId(), m.GetSeq(), m.GetSenderId(), string(m.GetPayload()))
-		}
-	default:
-		fmt.Printf("[recv] %s seq=%d body=%dB\n", name, f.Seq, len(f.Body))
-	}
-}
-
-// catchUp 逐会话按本地游标循环 SYNC_PULL(100) 直到追平 max_seq，
-// 全部完成后按会话最大 seq 发 MSG_RECEIVED_ACK（服务端据此 MarkRead）。
-func catchUp(ws *websocket.Conn, nextSeq func() uint32, syncSeqs map[string]int64, convs []*pb.ConvBrief) {
-	for _, cv := range convs {
-		local := syncSeqs[cv.GetConvId()]
-		got := 0
-		for round := 0; ; round++ {
-			if local >= cv.GetMaxSeq() {
-				break
-			}
-			send(ws, protocol.CmdSyncPull, nextSeq(), &pb.SyncPullReq{
-				ConvId: cv.GetConvId(), LocalMaxSeq: local, Limit: 100,
-			})
-			// 等待 SYNC_RESP（同步读，简单起见）。
-			resp, err := readSyncResp(ws)
-			if err != nil {
-				fmt.Printf("[sync] conv=%s 拉取失败: %v\n", cv.GetConvId(), err)
-				return
-			}
-			for _, m := range resp.GetMessages() {
-				got++
-				if m.GetSeq() > local {
-					local = m.GetSeq()
-				}
-				fmt.Printf("[sync-msg] conv=%s seq=%d from=%d payload=%q\n",
-					m.GetConvId(), m.GetSeq(), m.GetSenderId(), string(m.GetPayload()))
-			}
-			syncSeqs[cv.GetConvId()] = local
-			if resp.GetMaxSeq() > cv.GetMaxSeq() {
-				cv.MaxSeq = resp.GetMaxSeq() // 服务端又来了新消息，继续追
-			}
-			if len(resp.GetMessages()) == 0 {
-				break
-			}
-		}
-		fmt.Printf("[sync] conv=%s got=%d local_max=%d target=%d\n",
-			cv.GetConvId(), got, local, cv.GetMaxSeq())
-		if local > 0 {
-			send(ws, protocol.CmdMsgReceivedAck, nextSeq(), &pb.ReceivedAckReq{
-				ConvId: cv.GetConvId(), Seq: local,
-			})
-		}
-	}
-}
-
-// readSyncResp 阻塞读取下一帧直到 SYNC_RESP（与心跳等并发帧交错时跳过其他帧）。
-func readSyncResp(ws *websocket.Conn) (*pb.SyncResp, error) {
-	for i := 0; i < 64; i++ { // 有限尝试，避免永久阻塞
-		mt, data, err := ws.ReadMessage()
-		if err != nil {
-			return nil, err
-		}
-		if mt != websocket.BinaryMessage {
-			continue
-		}
-		frame, err := protocol.Decode(data)
-		if err != nil || frame.Cmd != protocol.CmdSyncResp {
-			continue
-		}
-		var resp pb.SyncResp
-		if err := proto.Unmarshal(frame.Body, &resp); err != nil {
-			return nil, err
-		}
-		return &resp, nil
-	}
-	return nil, fmt.Errorf("SYNC_RESP 未在有限帧内到达")
 }

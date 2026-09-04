@@ -1,0 +1,57 @@
+# logic：无状态 gRPC，HPA 按 CPU 70% 扩缩容。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logic
+  namespace: linkim
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: logic }
+  template:
+    metadata:
+      labels: { app: logic }
+    spec:
+      containers:
+        - name: logic
+          image: linkim/logic:latest
+          args: ["-conf", "/etc/linkim/logic.yaml"]
+          ports:
+            - { name: grpc, containerPort: 9001 }
+            - { name: metrics, containerPort: 9091 }
+          volumeMounts:
+            - { name: config, mountPath: /etc/linkim }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: "1", memory: 512Mi }
+      volumes:
+        - name: config
+          configMap: { name: linkim-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logic
+  namespace: linkim
+spec:
+  selector: { app: logic }
+  ports:
+    - { name: grpc, port: 9001, targetPort: 9001 }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: logic
+  namespace: linkim
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: logic
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }

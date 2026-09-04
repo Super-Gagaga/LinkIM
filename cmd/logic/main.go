@@ -2,6 +2,8 @@
 package main
 
 import (
+	"net/http"
+
 	"context"
 	"errors"
 	"flag"
@@ -12,6 +14,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -85,6 +89,16 @@ func main() {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		logger.Fatal("监听 gRPC 端口失败", zap.String("addr", addr), zap.Error(err))
+	}
+
+	if cfg.Server.MetricsPort > 0 {
+		go func() {
+			mux := http.NewServeMux()
+			mux.Handle("/metrics", promhttp.Handler())
+			if err := http.ListenAndServe(fmt.Sprintf(":%d", cfg.Server.MetricsPort), mux); err != nil {
+				logger.Error("metrics serve failed", zap.Error(err))
+			}
+		}()
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

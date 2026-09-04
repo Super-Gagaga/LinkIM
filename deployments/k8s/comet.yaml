@@ -1,0 +1,48 @@
+# comet：长连接网关。
+# 优雅下线（设计文档 12.2）：SIGTERM 后进程 drain 30s；
+# preStop sleep 10 给 LB 摘流时间；terminationGracePeriodSeconds 40 容纳整个流程。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: comet
+  namespace: linkim
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: comet }
+  template:
+    metadata:
+      labels: { app: comet }
+    spec:
+      terminationGracePeriodSeconds: 40
+      containers:
+        - name: comet
+          image: linkim/comet:latest
+          args: ["-conf", "/etc/linkim/comet.yaml"]
+          ports:
+            - { name: ws, containerPort: 8081 }
+            - { name: grpc, containerPort: 9000 }
+          volumeMounts:
+            - { name: config, mountPath: /etc/linkim }
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "10"] # 等待 LB/endpoints 摘流后再触发 SIGTERM drain
+          readinessProbe:
+            httpGet: { path: /metrics, port: 8081 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap: { name: linkim-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: comet
+  namespace: linkim
+spec:
+  selector: { app: comet }
+  ports:
+    - { name: ws, port: 8081, targetPort: 8081 }
+    - { name: grpc, port: 9000, targetPort: 9000 }

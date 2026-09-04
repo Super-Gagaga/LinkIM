@@ -88,6 +88,8 @@ go run ./scripts/wsclient.go -addr ws://127.0.0.1:8081/ws -token <access_token> 
 | S7 | Job 推送层（投递 + 批量落库 + DLQ） | ✅ |
 | S8 | 离线同步与多端（seq 游标 / 已读 / 上线补拉） | ✅ |
 | S9 | 群聊（群管理 / 成员扇出 / 群事件） | ✅ |
-| S10 | 高可用 / 可观测 / 部署 | ⬜ |
+| S10 | 高可用 / 可观测 / 部署（metrics + drain + k8s） | ✅ |
+
+**MVP（P0）已全部完成**：单聊、群聊、离线同步、多端登录、优雅重启、基础可观测均已落地。详细里程碑见 `docs/implementation-guide.md`。
 
 详细里程碑见 `docs/implementation-guide.md`。
