@@ -62,8 +62,10 @@ func main() {
 	}
 	defer func() { _ = logicConn.Close() }()
 
-	srv := comet.NewServer(cfg.Server.AdvertiseAddr, rdb, pb.NewLogicClient(logicConn),
-		cfg.Logic.CallTimeout, logger, nil)
+	// S6：注入 MSG_SEND 分发器（gRPC 调 logic.SendMsg）。
+	logicCli := pb.NewLogicClient(logicConn)
+	srv := comet.NewServer(cfg.Server.AdvertiseAddr, rdb, logicCli,
+		cfg.Logic.CallTimeout, logger, comet.NewLogicDispatcher(logicCli, logger))
 
 	// 存活注册：comet:alive:{addr} EX 30，10s 续期。
 	alive := comet.NewAlive(rdb, cfg.Server.AdvertiseAddr, logger)

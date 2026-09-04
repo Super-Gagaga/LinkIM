@@ -67,7 +67,7 @@ func (v *stubVerifier) callCount() int {
 }
 
 func newTestServer(cache Cache, verifier Verifier) *Server {
-	return NewServer(cache, verifier, zap.NewNop())
+	return NewServer(Deps{Cache: cache, Verifier: verifier, Logger: zap.NewNop()})
 }
 
 // TestTokenCacheKey 钉死缓存 key 格式。
@@ -216,11 +216,9 @@ func TestVerifyTokenRPC(t *testing.T) {
 
 	t.Run("unimplemented RPCs return codes.Unimplemented", func(t *testing.T) {
 		svc := newTestServer(newMemCache(), &stubVerifier{})
+		// SendMsg 自 S6 起已实现，不再断言其 Unimplemented。
 
-		_, err := svc.SendMsg(ctx, &pb.SendMsgReq{})
-		assert.Equal(t, codes.Unimplemented, status.Code(err))
-
-		_, err = svc.SyncPull(ctx, &pb.SyncPullReq{})
+		_, err := svc.SyncPull(ctx, &pb.SyncPullReq{})
 		assert.Equal(t, codes.Unimplemented, status.Code(err))
 
 		_, err = svc.ReportDelivered(ctx, &pb.ReportDeliveredReq{})

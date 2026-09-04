@@ -11,20 +11,48 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/linkim/linkim/pkg/pb"
+	"github.com/linkim/linkim/pkg/snowflake"
 )
 
-// Server 实现 pb.LogicServer。S4 仅实现 VerifyToken，
-// 其余 RPC 继承 Unimplemented，供后续步骤逐步替换。
+// Server 实现 pb.LogicServer。
+// S4 实现 VerifyToken；S6 实现 SendMsg；其余 RPC 继承 Unimplemented。
 type Server struct {
 	pb.UnimplementedLogicServer
+
 	cache    Cache
 	verifier Verifier
+	friends  FriendChecker
+	seq      SeqGen
+	idem     IdemStore
+	ids      *snowflake.Node
+	producer Producer
 	logger   *zap.Logger
 }
 
+// Deps 聚合 Server 的全部依赖（接口注入，便于单测 mock）。
+type Deps struct {
+	Cache    Cache
+	Verifier Verifier
+	Friends  FriendChecker
+	Seq      SeqGen
+	Idem     IdemStore
+	IDs      *snowflake.Node
+	Producer Producer
+	Logger   *zap.Logger
+}
+
 // NewServer 构造 Logic 服务实现。
-func NewServer(cache Cache, verifier Verifier, logger *zap.Logger) *Server {
-	return &Server{cache: cache, verifier: verifier, logger: logger}
+func NewServer(d Deps) *Server {
+	return &Server{
+		cache:    d.Cache,
+		verifier: d.Verifier,
+		friends:  d.Friends,
+		seq:      d.Seq,
+		idem:     d.Idem,
+		ids:      d.IDs,
+		producer: d.Producer,
+		logger:   d.Logger,
+	}
 }
 
 // VerifyToken 实现 gRPC Logic.VerifyToken。

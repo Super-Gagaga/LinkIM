@@ -84,6 +84,7 @@ go run ./scripts/wsclient.go -addr ws://127.0.0.1:8081/ws -token <access_token> 
 | S3 | Account 账号服务（HTTP + JWT） | ✅ |
 | S4 | Logic 骨架与鉴权（gRPC） | ✅ |
 | S5 | Comet 长连接接入层（WS + 互踢 + 路由表） | ✅ |
-| S6+ | 单聊链路 / Job 等服务实现 | ⬜ |
+| S6 | 单聊上行链路（幂等 / seq / 双写 Kafka） | ✅ |
+| S7+ | Job 推送层等服务实现 | ⬜ |
 
 详细里程碑见 `docs/implementation-guide.md`。

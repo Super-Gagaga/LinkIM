@@ -843,7 +843,7 @@ go test ./internal/logic/ 通过（token 缓存逻辑用 miniredis 或 mock 测�
 | S3  | Account 账号服务   | ☑   |        |
 | S4  | Logic 骨架与鉴权    | ☑   |        |
 | S5  | Comet 长连接接入层   | ☑   |        |
-| S6  | 单聊上行链路         | ☐   |        |
+| S6  | 单聊上行链路         | ☑   |        |
 | S7  | Job 推送层（投递+落库） | ☐   |        |
 | S8  | 离线同步与多端        | ☐   |        |
 | S9  | 群聊             | ☐   |        |
