@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"github.com/linkim/linkim/internal/logic"
+	"github.com/linkim/linkim/internal/service"
 	"github.com/linkim/linkim/pkg/conf"
 	"github.com/linkim/linkim/pkg/kafkax"
 	"github.com/linkim/linkim/pkg/logx"
@@ -72,6 +73,7 @@ func main() {
 		IDs:      ids,
 		Producer: producer,
 		Sync:     logic.NewMySQLSyncStore(db),
+		Members:  service.NewGroupMembers(rdb, db),
 		Redis:    rdb,
 		Logger:   logger,
 	})

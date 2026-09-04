@@ -13,6 +13,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +36,7 @@ var (
 	cmid     = flag.String("cmid", "", "指定 client_msg_id（缺省随机；幂等重发实验用）")
 	sendN    = flag.Int("n", 1, "配合 -send 发送的条数")
 	sendGap  = flag.Duration("gap", 300*time.Millisecond, "多条发送间隔")
+	convFlag = flag.String("conv", "", "指定会话 ID 发送（g: 前缀为群聊；空则用 -peer 单聊）")
 )
 
 func main() {
@@ -110,12 +112,18 @@ func main() {
 
 	// AUTH_ACK 到达后再发消息（简单等待：固定短暂延迟）。
 	if *sendTxt != "" {
-		if *peer == 0 {
-			log.Fatal("发送消息必须提供 -peer")
+		if *peer == 0 && *convFlag == "" {
+			log.Fatal("发送消息必须提供 -peer 或 -conv")
 		}
 		go func() {
 			time.Sleep(500 * time.Millisecond) // 等待 AUTH_ACK
-			conv := convP2P(*uidFlag, *peer)
+			conv := *convFlag
+			convType := int32(1)
+			if conv == "" {
+				conv = convP2P(*uidFlag, *peer)
+			} else if strings.HasPrefix(conv, "g:") {
+				convType = 2
+			}
 			for i := 0; i < *sendN; i++ {
 				id := *cmid
 				if id == "" {
@@ -124,7 +132,7 @@ func main() {
 				send(ws, protocol.CmdMsgSend, nextSeq(), &pb.MsgSendReq{
 					ClientMsgId: id,
 					ConvId:      conv,
-					ConvType:    1,
+					ConvType:    convType,
 					MsgType:     1,
 					Payload:     []byte(*sendTxt),
 				})

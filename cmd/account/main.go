@@ -17,6 +17,7 @@ import (
 
 	"github.com/linkim/linkim/internal/account"
 	"github.com/linkim/linkim/pkg/conf"
+	"github.com/linkim/linkim/pkg/kafkax"
 	"github.com/linkim/linkim/pkg/logx"
 	"github.com/linkim/linkim/pkg/mysqlx"
 	"github.com/linkim/linkim/pkg/redisx"
@@ -70,7 +71,9 @@ func main() {
 		account.NewTokenManager(cfg.JWT.Secret, cfg.JWT.AccessTTL, cfg.JWT.RefreshTTL),
 		ids,
 	)
-	handler := account.NewHandler(svc, logger)
+	producer := kafkax.NewProducer(cfg.Kafka)
+	groupSvc := account.NewGroupService(account.NewMySQLGroupStore(db), ids, producer)
+	handler := account.NewHandler(svc, groupSvc, logger)
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Server.HTTPPort),

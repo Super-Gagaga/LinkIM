@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/linkim/linkim/internal/job"
+	"github.com/linkim/linkim/internal/service"
 	"github.com/linkim/linkim/pkg/conf"
 	"github.com/linkim/linkim/pkg/kafkax"
 	"github.com/linkim/linkim/pkg/logx"
@@ -68,10 +69,19 @@ func main() {
 	commit := func(cctx context.Context, msgs []kafka.Message) error {
 		return storeReader.CommitMessages(cctx, msgs...)
 	}
-	storeWorker := job.NewStoreWorker(db, producer, commit, logger)
+	storeWorker := job.NewStoreWorker(db, producer, commit, service.NewGroupMembers(rdb, db), logger)
 	kmCh := make(chan kafka.Message, 256)
 
-	errCh := make(chan error, 3)
+	errCh := make(chan error, 4)
+
+	// group.event：群成员变更（失效缓存 + 补建会话行）。
+	groupReader := job.NewReader(cfg.Kafka.Brokers, "job-group", job.TopicGroupEvent,
+		cfg.Consumer.MinBytes, cfg.Consumer.MaxBytes, cfg.Consumer.ReadBackoffMax)
+	groupWorker := job.NewGroupEventWorker(rdb, db, logger)
+	go func() {
+		logger.Info("group event consumer starting")
+		errCh <- job.RunLoop(ctx, groupReader, groupWorker.Handle, logger)
+	}()
 	go func() {
 		logger.Info("push consumer starting", zap.String("group", cfg.Consumer.PushGroup))
 		errCh <- job.RunLoop(ctx, pushReader, pushWorker.Handle, logger)
@@ -103,6 +113,9 @@ func main() {
 
 	if err := pushReader.Close(); err != nil {
 		logger.Error("关闭 push reader 失败", zap.Error(err))
+	}
+	if err := groupReader.Close(); err != nil {
+		logger.Error("关闭 group reader 失败", zap.Error(err))
 	}
 	if err := storeReader.Close(); err != nil {
 		logger.Error("关闭 store reader 失败", zap.Error(err))

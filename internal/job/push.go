@@ -68,24 +68,20 @@ func (p *CometPool) Close() {
 	p.conns = map[string]*grpc.ClientConn{}
 }
 
-// Handle 处理一条 msg.push 消息：解析 → 查路由 → 按存活 comet 分组投递。
+// Handle 处理一条 msg.push 消息：解析 Envelope → 查路由 → 按存活 comet 分组投递。
 // 返回 nil 表示该消息已处置完毕（可提交 offset）；
 // 投递失败也返回 nil——消息仍会落库，靠 S8 拉取兜底（设计文档 6.1 ⑤）。
 func (w *PushWorker) Handle(ctx context.Context, km kafka.Message) error {
-	var msg pb.PbMsg
-	if err := proto.Unmarshal(km.Value, &msg); err != nil {
-		// 毒消息：跳过并提交，避免阻塞分区。
-		w.logger.Warn("msg.push payload not a PbMsg, skip",
+	// S9 起 msg.push 统一携带 Envelope{recv_uid, msg}（单聊/群聊同构）。
+	var env pb.Envelope
+	if err := proto.Unmarshal(km.Value, &env); err != nil || env.GetMsg() == nil || env.GetRecvUid() <= 0 {
+		// 毒消息或旧格式：跳过并提交，避免阻塞分区。
+		w.logger.Warn("msg.push payload not a valid Envelope, skip",
 			zap.Int("partition", km.Partition), zap.Int64("offset", km.Offset), zap.Error(err))
 		return nil
 	}
-
-	recv, err := ReceiverOf(&msg)
-	if err != nil {
-		w.logger.Warn("cannot resolve receiver, skip",
-			zap.String("conv", msg.GetConvId()), zap.Int64("sender", msg.GetSenderId()), zap.Error(err))
-		return nil
-	}
+	recv := env.GetRecvUid()
+	msg := env.GetMsg()
 
 	route, err := w.rdb.HGetAll(ctx, redisx.RouteKey(recv)).Result()
 	if err != nil {
@@ -100,7 +96,7 @@ func (w *PushWorker) Handle(ctx context.Context, km kafka.Message) error {
 		return nil
 	}
 
-	frame, err := BuildPushFrame(&msg)
+	frame, err := BuildPushFrame(msg)
 	if err != nil {
 		w.logger.Error("build push frame failed", zap.Error(err))
 		return nil
@@ -114,7 +110,7 @@ func (w *PushWorker) Handle(ctx context.Context, km kafka.Message) error {
 				zap.String("addr", addr), zap.Error(err))
 			continue
 		}
-		w.pushToOne(ctx, addr, recv, device, frame, &msg)
+		w.pushToOne(ctx, addr, recv, device, frame, msg)
 	}
 	return nil
 }

@@ -38,9 +38,8 @@ func (s *Server) SyncPull(ctx context.Context, req *pb.SyncPullReq) (*pb.SyncPul
 	}
 	limit := clampLimit(int(req.GetLimit()))
 
-	// 会话归属校验：请求者必须是会话成员（不信任客户端）。
-	a, b, err := service.ParseP2PConv(req.GetConvId())
-	if err != nil || (uid != a && uid != b) {
+	// 会话归属校验：单聊取双方校验；群聊用成员源校验（不信任客户端）。
+	if err := s.checkSyncMember(ctx, uid, req.GetConvId()); err != nil {
 		return &pb.SyncPullResp{Code: CodeBadParam}, nil
 	}
 
@@ -51,6 +50,25 @@ func (s *Server) SyncPull(ctx context.Context, req *pb.SyncPullReq) (*pb.SyncPul
 		return &pb.SyncPullResp{Code: CodeRedisErr}, nil
 	}
 	return &pb.SyncPullResp{Code: 0, Messages: msgs, MaxSeq: maxSeq}, nil
+}
+
+// checkSyncMember 校验 uid 是否为会话成员：单聊解析双方，群聊查成员源。
+func (s *Server) checkSyncMember(ctx context.Context, uid int64, convID string) error {
+	if gid, err := service.ParseGroupConv(convID); err == nil {
+		if s.members == nil {
+			return fmt.Errorf("logic: no member source")
+		}
+		isMember, err := s.members.IsMember(ctx, gid, uid)
+		if err != nil || !isMember {
+			return fmt.Errorf("logic: not group member")
+		}
+		return nil
+	}
+	a, b, err := service.ParseP2PConv(convID)
+	if err != nil || (uid != a && uid != b) {
+		return fmt.Errorf("logic: not conv member")
+	}
+	return nil
 }
 
 // clampLimit 钳制 limit 到 [1,100]（设计文档 10.1：上限 100，循环客户端驱动）。

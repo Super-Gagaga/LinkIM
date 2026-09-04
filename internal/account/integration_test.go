@@ -48,7 +48,7 @@ func newIntegrationServer(t *testing.T) (*httptest.Server, *Service) {
 	tm := NewTokenManager("integration-secret", time.Hour, 24*time.Hour)
 	svc := NewService(NewMySQLStore(db), NewRedisTokenCache(rdb), tm, ids)
 
-	srv := httptest.NewServer(NewHandler(svc, zap.NewNop()).Handler())
+	srv := httptest.NewServer(NewHandler(svc, nil, zap.NewNop()).Handler())
 	t.Cleanup(srv.Close)
 	return srv, svc
 }

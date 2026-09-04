@@ -88,6 +88,7 @@ services:
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic msg.store    --partitions 128 --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic msg.notify   --partitions 8   --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic presence     --partitions 8   --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic group.event --partitions 8   --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic dlq.msg.push --partitions 4   --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic dlq.msg.store --partitions 8  --replication-factor 1
         echo "all topics created:"

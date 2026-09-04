@@ -111,3 +111,11 @@ message MarkReadReq {
   string conv_id = 2;
   int64 seq = 3; // 已读到的会话 seq（新游标）
 }
+
+// Envelope 是 msg.push 的 value：接收者 + 消息本体。
+// 单聊与群聊统一使用（群聊由 Logic 按成员逐个副本写入，recv_uid 唯一，
+// 保证同一接收者的消息落在同一 Kafka 分区从而有序，设计文档 11.2）。
+message Envelope {
+  int64 recv_uid = 1;
+  PbMsg msg = 2;
+}

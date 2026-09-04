@@ -29,6 +29,7 @@ const (
 	idemTTL       = 10 * time.Minute // 幂等键有效期
 	msgMaxPayload = protocol.MaxBodyLen
 	convTypeP2P   = 1
+	convTypeGroup = 2
 )
 
 // Kafka topic（设计文档 8.1）。
@@ -61,14 +62,21 @@ type Producer interface {
 	Send(ctx context.Context, topic string, key, value []byte, headers ...map[string]string) error
 }
 
+// GroupMemberSource 群成员源（internal/service.GroupMembers 实现：SMEMBERS 缓存 + DB 回填）。
+type GroupMemberSource interface {
+	Members(ctx context.Context, gid int64) ([]int64, error)
+	IsMember(ctx context.Context, gid, uid int64) (bool, error)
+}
+
 // idemValue 是幂等键中存储的 ACK 回放数据。
 type idemValue struct {
 	MsgID string `json:"msg_id"`
 	Seq   int64  `json:"seq"`
 }
 
-// SendMsg 实现 gRPC Logic.SendMsg（设计文档 5.1 上行时序）：
-// 参数校验 → conv 规范化 → 幂等 → 好友校验 → seq → msgId → 双写 Kafka → ACK。
+// SendMsg 实现 gRPC Logic.SendMsg（设计文档 5.1 上行时序、11 节群扩散）：
+// 参数校验 → conv 规范化 → 幂等 → 关系校验（好友/群成员）→ seq → msgId →
+// 写 Kafka（store 单份；push 按接收者扇出 Envelope）→ ACK。
 func (s *Server) SendMsg(ctx context.Context, req *pb.SendMsgReq) (*pb.SendMsgAck, error) {
 	// 1. 参数校验。
 	if req.GetSenderId() <= 0 || req.GetClientMsgId() == "" || req.GetMsgType() <= 0 {
@@ -77,26 +85,45 @@ func (s *Server) SendMsg(ctx context.Context, req *pb.SendMsgReq) (*pb.SendMsgAc
 	if len(req.GetPayload()) == 0 || len(req.GetPayload()) > msgMaxPayload {
 		return &pb.SendMsgAck{Code: CodeBadParam}, nil
 	}
-	if req.GetConvType() != convTypeP2P {
-		// 群聊（conv_type=2）自 S9 支持。
-		return &pb.SendMsgAck{Code: CodeBadParam}, nil
-	}
+	sender := req.GetSenderId()
 
 	// 2. conv_id 规范化：服务端重算，不信任客户端传入。
-	a, b, err := service.ParseP2PConv(req.GetConvId())
-	if err != nil {
+	var (
+		convID    string
+		receivers []int64 // msg.push 接收者列表
+		gid       int64   // 群聊时有效
+	)
+	switch req.GetConvType() {
+	case convTypeP2P:
+		a, b, err := service.ParseP2PConv(req.GetConvId())
+		if err != nil {
+			return &pb.SendMsgAck{Code: CodeBadParam}, nil
+		}
+		peer := a
+		if sender == a {
+			peer = b
+		} else if sender != b {
+			return &pb.SendMsgAck{Code: CodeBadParam}, nil // 发送者不在会话中
+		}
+		convID = service.ConvIDForP2P(sender, peer)
+		if convID != req.GetConvId() {
+			return &pb.SendMsgAck{Code: CodeBadParam}, nil // 非规范化 conv_id
+		}
+		receivers = []int64{peer}
+
+	case convTypeGroup:
+		var err error
+		gid, err = service.ParseGroupConv(req.GetConvId())
+		if err != nil {
+			return &pb.SendMsgAck{Code: CodeBadParam}, nil
+		}
+		convID = service.ConvIDForGroup(gid)
+		if convID != req.GetConvId() {
+			return &pb.SendMsgAck{Code: CodeBadParam}, nil
+		}
+
+	default:
 		return &pb.SendMsgAck{Code: CodeBadParam}, nil
-	}
-	sender := req.GetSenderId()
-	peer := a
-	if sender == a {
-		peer = b
-	} else if sender != b {
-		return &pb.SendMsgAck{Code: CodeBadParam}, nil // 发送者不在会话中
-	}
-	convID := service.ConvIDForP2P(sender, peer)
-	if convID != req.GetConvId() {
-		return &pb.SendMsgAck{Code: CodeBadParam}, nil // 非规范化 conv_id
 	}
 
 	// 3. 幂等：SETNX 占位，命中则回放或提示在途。
@@ -117,16 +144,37 @@ func (s *Server) SendMsg(ctx context.Context, req *pb.SendMsgReq) (*pb.SendMsgAc
 		}
 	}
 
-	// 4. 好友关系校验。
-	isFriend, err := s.friends.IsFriend(ctx, sender, peer)
-	if err != nil {
-		s.logger.Warn("friend check failed", zap.Error(err))
-		rollback()
-		return &pb.SendMsgAck{Code: CodeRedisErr}, nil
-	}
-	if !isFriend {
-		rollback()
-		return &pb.SendMsgAck{Code: CodeNotFriend}, nil
+	// 4. 关系校验：单聊好友 / 群聊成员（并在此取群成员列表做扇出）。
+	if req.GetConvType() == convTypeP2P {
+		isFriend, err := s.friends.IsFriend(ctx, sender, receivers[0])
+		if err != nil {
+			s.logger.Warn("friend check failed", zap.Error(err))
+			rollback()
+			return &pb.SendMsgAck{Code: CodeRedisErr}, nil
+		}
+		if !isFriend {
+			rollback()
+			return &pb.SendMsgAck{Code: CodeNotFriend}, nil
+		}
+	} else {
+		members, err := s.members.Members(ctx, gid)
+		if err != nil {
+			s.logger.Warn("group members load failed", zap.Int64("gid", gid), zap.Error(err))
+			rollback()
+			return &pb.SendMsgAck{Code: CodeRedisErr}, nil
+		}
+		isMember := false
+		for _, m := range members {
+			if m == sender {
+				isMember = true
+				continue
+			}
+			receivers = append(receivers, m) // 发送者本人跳过（设计文档 11）
+		}
+		if !isMember {
+			rollback()
+			return &pb.SendMsgAck{Code: CodeNotFriend}, nil // 非群成员
+		}
 	}
 
 	// 5. 会话内 seq（Redis INCR 严格递增）。
@@ -141,28 +189,48 @@ func (s *Server) SendMsg(ctx context.Context, req *pb.SendMsgReq) (*pb.SendMsgAc
 	msgID := s.ids.Next()
 	ts := time.Now().UnixMilli()
 
-	// 7. 组装 PbMsg 并双写 Kafka（key=conv_id 保序，header 带 trace-id）。
+	// 7. 写 Kafka：
+	//    msg.store 单份（key=conv_id 保序）；
+	//    msg.push 按接收者扇出 Envelope（群聊 key=uid 保证同一接收者有序，
+	//    设计文档 11.2；单聊 key=conv_id，设计文档 8.1）。
 	msg := &pb.PbMsg{
 		MsgId:     fmt.Sprintf("%d", msgID),
 		ConvId:    convID,
-		ConvType:  convTypeP2P,
+		ConvType:  req.GetConvType(),
 		SenderId:  sender,
 		MsgType:   req.GetMsgType(),
 		Payload:   req.GetPayload(),
 		Seq:       seq,
 		Timestamp: ts,
 	}
-	value, err := proto.Marshal(msg)
+	storeValue, err := proto.Marshal(msg)
 	if err != nil {
 		s.logger.Error("pbmsg marshal failed", zap.Error(err))
 		rollback()
 		return &pb.SendMsgAck{Code: CodeKafkaErr}, nil
 	}
-	headers := map[string]string{"trace-id": req.GetClientMsgId(), "conv-type": "1"}
-	for _, topic := range []string{TopicMsgPush, TopicMsgStore} {
-		if err := s.producer.Send(ctx, topic, []byte(convID), value, headers); err != nil {
-			s.logger.Warn("kafka produce failed",
-				zap.String("topic", topic), zap.Error(err))
+	headers := map[string]string{
+		"trace-id":  req.GetClientMsgId(),
+		"conv-type": fmt.Sprintf("%d", req.GetConvType()),
+	}
+	if err := s.producer.Send(ctx, TopicMsgStore, []byte(convID), storeValue, headers); err != nil {
+		s.logger.Warn("kafka produce failed", zap.String("topic", TopicMsgStore), zap.Error(err))
+		rollback()
+		return &pb.SendMsgAck{Code: CodeKafkaErr}, nil
+	}
+	for _, recv := range receivers {
+		env, err := proto.Marshal(&pb.Envelope{RecvUid: recv, Msg: msg})
+		if err != nil {
+			s.logger.Error("envelope marshal failed", zap.Error(err))
+			rollback()
+			return &pb.SendMsgAck{Code: CodeKafkaErr}, nil
+		}
+		key := convID
+		if req.GetConvType() == convTypeGroup {
+			key = fmt.Sprintf("%d", recv)
+		}
+		if err := s.producer.Send(ctx, TopicMsgPush, []byte(key), env, headers); err != nil {
+			s.logger.Warn("kafka produce failed", zap.String("topic", TopicMsgPush), zap.Error(err))
 			rollback()
 			return &pb.SendMsgAck{Code: CodeKafkaErr}, nil
 		}
@@ -176,7 +244,7 @@ func (s *Server) SendMsg(ctx context.Context, req *pb.SendMsgReq) (*pb.SendMsgAc
 	}
 	s.logger.Info("msg accepted",
 		zap.String("msg_id", msg.MsgId), zap.Int64("sender", sender),
-		zap.Int64("peer", peer), zap.String("conv", convID), zap.Int64("seq", seq),
+		zap.Int64("peer", receivers[0]), zap.String("conv", convID), zap.Int64("seq", seq),
 		zap.String("trace-id", req.GetClientMsgId()))
 	return &pb.SendMsgAck{Code: 0, MsgId: msg.MsgId, Seq: seq, Timestamp: ts}, nil
 }

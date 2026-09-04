@@ -44,3 +44,27 @@ func ParseP2PConv(convID string) (int64, int64, error) {
 func ShardOfConv(convID string) string {
 	return mysqlx.ShardTable(convID)
 }
+
+// ConvType 常量。
+const (
+	ConvTypeP2P   = int32(1)
+	ConvTypeGroup = int32(2)
+)
+
+// ConvIDForGroup 返回群聊会话 ID："g:{gid}"。
+func ConvIDForGroup(gid int64) string {
+	return fmt.Sprintf("g:%d", gid)
+}
+
+// ParseGroupConv 解析群聊会话 ID，返回 gid；格式非法返回错误。
+func ParseGroupConv(convID string) (int64, error) {
+	parts := strings.Split(convID, ":")
+	if len(parts) != 2 || parts[0] != "g" {
+		return 0, fmt.Errorf("service: invalid group conv id %q", convID)
+	}
+	gid, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || gid <= 0 {
+		return 0, fmt.Errorf("service: invalid group conv id %q: %w", convID, err)
+	}
+	return gid, nil
+}

@@ -150,7 +150,28 @@ type sendFixture struct {
 	idem     *memIdem
 	seq      *memSeq
 	friends  *memFriends
+	members  *memMembers
 	producer *memProducer
+}
+
+// memMembers 是 GroupMemberSource 的内存实现。
+type memMembers struct {
+	groups map[int64][]int64
+}
+
+func newMemMembers() *memMembers { return &memMembers{groups: map[int64][]int64{}} }
+
+func (m *memMembers) Members(_ context.Context, gid int64) ([]int64, error) {
+	return m.groups[gid], nil
+}
+
+func (m *memMembers) IsMember(_ context.Context, gid, uid int64) (bool, error) {
+	for _, x := range m.groups[gid] {
+		if x == uid {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // 7 与 8 互为好友。
@@ -167,10 +188,12 @@ func newSendFixture(t *testing.T, producer *memProducer) *sendFixture {
 		idem:     newMemIdem(),
 		seq:      &memSeq{},
 		friends:  newMemFriends(friendPair),
+		members:  newMemMembers(),
 		producer: producer,
 	}
 	f.srv = NewServer(Deps{
 		Friends:  f.friends,
+		Members:  f.members,
 		Seq:      f.seq,
 		Idem:     f.idem,
 		IDs:      ids,
@@ -309,8 +332,8 @@ func TestSendMsgKafkaFailureRollsBackIdem(t *testing.T) {
 	ack, err := f.srv.SendMsg(ctx, validSendReq())
 	require.NoError(t, err)
 	assert.Equal(t, int32(CodeKafkaErr), ack.GetCode())
-	// 只写进了 msg.store（push 先失败）。
-	assert.Equal(t, 0, producer.count(), "push 先失败，未写任何 topic")
+	// 先写 store（成功）后写 push（失败）：store 已落 1 条。
+	assert.Equal(t, 1, producer.count(), "store 已写入，push 失败")
 	// 幂等键被删除，客户端可重发。
 	assert.Empty(t, f.idem.raw(redisx.IdemKey(7, "cmid-1")))
 
@@ -321,7 +344,7 @@ func TestSendMsgKafkaFailureRollsBackIdem(t *testing.T) {
 	ack, err = f.srv.SendMsg(ctx, validSendReq())
 	require.NoError(t, err)
 	assert.Equal(t, int32(0), ack.GetCode())
-	assert.Equal(t, 2, producer.count(), "重发补齐双写")
+	assert.Equal(t, 3, producer.count(), "重发补齐：store + push 各一条")
 }
 
 func TestSendMsgBadParams(t *testing.T) {
@@ -383,4 +406,56 @@ type errSeqGen struct{}
 
 func (errSeqGen) Next(context.Context, string) (int64, error) {
 	return 0, errors.New("seq unavailable")
+}
+
+// TestSendMsgGroupFanout 群聊扇出：副本数 = 成员数 - 1（发送者跳过），key=uid。
+func TestSendMsgGroupFanout(t *testing.T) {
+	ctx := context.Background()
+	f := newSendFixture(t, nil)
+	// 群 g:100：成员 7（发送者）、8、9、10。
+	f.members.groups[100] = []int64{7, 8, 9, 10}
+
+	req := &pb.SendMsgReq{
+		SenderId: 7, ConvId: "g:100", ConvType: 2,
+		ClientMsgId: "gcmid-1", MsgType: 1, Payload: []byte("group hi"),
+	}
+	ack, err := f.srv.SendMsg(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, int32(0), ack.GetCode())
+	assert.Equal(t, int64(1), ack.GetSeq())
+
+	// msg.store 1 条 + msg.push 3 条（8/9/10）。
+	require.Equal(t, 4, f.producer.count())
+	var pushCount, storeCount int
+	f.producer.mu.Lock()
+	for _, s := range f.producer.sends {
+		switch s.Topic {
+		case TopicMsgPush:
+			pushCount++
+			assert.NotEqual(t, "g:100", s.Key, "群聊 push key 应为接收者 uid")
+			assert.Contains(t, []string{"8", "9", "10"}, s.Key)
+		case TopicMsgStore:
+			storeCount++
+			assert.Equal(t, "g:100", s.Key, "store key 保持 conv_id")
+		}
+	}
+	f.producer.mu.Unlock()
+	assert.Equal(t, 3, pushCount, "扇出副本数 = 成员数 - 1")
+	assert.Equal(t, 1, storeCount)
+}
+
+// TestSendMsgGroupNonMember 非成员发送被拒。
+func TestSendMsgGroupNonMember(t *testing.T) {
+	ctx := context.Background()
+	f := newSendFixture(t, nil)
+	f.members.groups[100] = []int64{8, 9} // 7 不在群内
+
+	ack, err := f.srv.SendMsg(ctx, &pb.SendMsgReq{
+		SenderId: 7, ConvId: "g:100", ConvType: 2,
+		ClientMsgId: "x", MsgType: 1, Payload: []byte("hi"),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int32(CodeNotFriend), ack.GetCode())
+	assert.Zero(t, f.producer.count())
+	assert.Empty(t, f.idem.raw(redisx.IdemKey(7, "x")))
 }

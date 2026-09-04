@@ -87,6 +87,7 @@ go run ./scripts/wsclient.go -addr ws://127.0.0.1:8081/ws -token <access_token> 
 | S6 | 单聊上行链路（幂等 / seq / 双写 Kafka） | ✅ |
 | S7 | Job 推送层（投递 + 批量落库 + DLQ） | ✅ |
 | S8 | 离线同步与多端（seq 游标 / 已读 / 上线补拉） | ✅ |
-| S9+ | 群聊等服务实现 | ⬜ |
+| S9 | 群聊（群管理 / 成员扇出 / 群事件） | ✅ |
+| S10 | 高可用 / 可观测 / 部署 | ⬜ |
 
 详细里程碑见 `docs/implementation-guide.md`。

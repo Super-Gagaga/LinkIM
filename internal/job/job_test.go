@@ -95,7 +95,7 @@ func item(m *pb.PbMsg, partition int, offset int64) storeItem {
 }
 
 func newStoreForTest(exec SQLExecer, prod Producer, commit CommitFunc) *StoreWorker {
-	return NewStoreWorker(exec, prod, commit, zap.NewNop())
+	return NewStoreWorker(exec, prod, commit, nil, zap.NewNop())
 }
 
 // --- 表名分组 ---
@@ -349,4 +349,44 @@ func decodeFrame(frame []byte) (*decodedFrame, error) {
 	d.header.ver = frame[0]
 	d.header.cmd = uint16(frame[1])<<8 | uint16(frame[2])
 	return d, nil
+}
+
+// TestBuildGroupConversationUpsertsBatch 群会话 UPSERT 分批正确。
+func TestBuildGroupConversationUpsertsBatch(t *testing.T) {
+	// 250 成员 → 3 批（100+100+50）。
+	members := make([]int64, 250)
+	for i := range members {
+		members[i] = int64(i + 1)
+	}
+	msg := pbMsg("1", 7, 1000, "g:500") // sender=1000 不在成员列表（无发送者行）
+	msg.ConvType = 2
+
+	stmts := BuildGroupConversationUpserts(msg, members, groupConvBatch)
+	require.Len(t, stmts, 3)
+	assert.Equal(t, 100*7, len(stmts[0].args))
+	assert.Equal(t, 100*7, len(stmts[1].args))
+	assert.Equal(t, 50*7, len(stmts[2].args))
+
+	// 每条语句都是 UPSERT。
+	assert.Contains(t, stmts[0].query, "ON DUPLICATE KEY UPDATE")
+	assert.Contains(t, stmts[0].query, "last_seq = GREATEST(last_seq, VALUES(last_seq))")
+
+	// 发送者在成员中时该行 unread delta=0。
+	msg2 := pbMsg("2", 8, 3, "g:501")
+	msg2.ConvType = 2
+	stmts2 := BuildGroupConversationUpserts(msg2, []int64{1, 2, 3}, groupConvBatch)
+	// 参数布局：uid(0) conv(1) type(2) target(3) last_seq(4) read_seq(5)=0 unread(6) updated(7)...
+	// 成员 3 = sender → delta 0。
+	assert.Equal(t, int64(1), stmts2[0].args[0]) // 第一个成员 uid=1
+	assert.Equal(t, int64(1), stmts2[0].args[5]) // uid=1 unread delta=1
+	// 找到 sender=3 的行（第三个成员，偏移 2*7=14）。
+	assert.Equal(t, int64(3), stmts2[0].args[14])
+	assert.Equal(t, int64(0), stmts2[0].args[19], "发送者行 unread delta=0")
+}
+
+// TestGroupEventWorkerInvalidPayload 毒消息跳过。
+func TestGroupEventWorkerInvalidPayload(t *testing.T) {
+	w := &GroupEventWorker{logger: zap.NewNop()}
+	err := w.Handle(context.Background(), kafka.Message{Value: []byte("not-json")})
+	assert.NoError(t, err)
 }

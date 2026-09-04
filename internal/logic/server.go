@@ -26,6 +26,7 @@ type Server struct {
 	idem     IdemStore
 	ids      *snowflake.Node
 	producer Producer
+	members  GroupMemberSource
 	sync     SyncStore
 	rdb      *redis.Client // OnlineEvent 的 presence 补写
 	logger   *zap.Logger
@@ -40,6 +41,7 @@ type Deps struct {
 	Idem     IdemStore
 	IDs      *snowflake.Node
 	Producer Producer
+	Members  GroupMemberSource
 	Sync     SyncStore
 	Redis    *redis.Client
 	Logger   *zap.Logger
@@ -55,6 +57,7 @@ func NewServer(d Deps) *Server {
 		idem:     d.Idem,
 		ids:      d.IDs,
 		producer: d.Producer,
+		members:  d.Members,
 		sync:     d.Sync,
 		rdb:      d.Redis,
 		logger:   d.Logger,

@@ -786,6 +786,61 @@ func (x *MarkReadReq) GetSeq() int64 {
 	return 0
 }
 
+// Envelope 是 msg.push 的 value：接收者 + 消息本体。
+// 单聊与群聊统一使用（群聊由 Logic 按成员逐个副本写入，recv_uid 唯一，
+// 保证同一接收者的消息落在同一 Kafka 分区从而有序，设计文档 11.2）。
+type Envelope struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RecvUid       int64                  `protobuf:"varint,1,opt,name=recv_uid,json=recvUid,proto3" json:"recv_uid,omitempty"`
+	Msg           *PbMsg                 `protobuf:"bytes,2,opt,name=msg,proto3" json:"msg,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Envelope) Reset() {
+	*x = Envelope{}
+	mi := &file_logic_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Envelope) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Envelope) ProtoMessage() {}
+
+func (x *Envelope) ProtoReflect() protoreflect.Message {
+	mi := &file_logic_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Envelope.ProtoReflect.Descriptor instead.
+func (*Envelope) Descriptor() ([]byte, []int) {
+	return file_logic_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *Envelope) GetRecvUid() int64 {
+	if x != nil {
+		return x.RecvUid
+	}
+	return 0
+}
+
+func (x *Envelope) GetMsg() *PbMsg {
+	if x != nil {
+		return x.Msg
+	}
+	return nil
+}
+
 var File_logic_proto protoreflect.FileDescriptor
 
 const file_logic_proto_rawDesc = "" +
@@ -847,7 +902,10 @@ const file_logic_proto_rawDesc = "" +
 	"\vMarkReadReq\x12\x10\n" +
 	"\x03uid\x18\x01 \x01(\x03R\x03uid\x12\x17\n" +
 	"\aconv_id\x18\x02 \x01(\tR\x06convId\x12\x10\n" +
-	"\x03seq\x18\x03 \x01(\x03R\x03seq2\x92\x04\n" +
+	"\x03seq\x18\x03 \x01(\x03R\x03seq\"O\n" +
+	"\bEnvelope\x12\x19\n" +
+	"\brecv_uid\x18\x01 \x01(\x03R\arecvUid\x12(\n" +
+	"\x03msg\x18\x02 \x01(\v2\x16.linkim.logic.v1.PbMsgR\x03msg2\x92\x04\n" +
 	"\x05Logic\x12P\n" +
 	"\vVerifyToken\x12\x1f.linkim.logic.v1.VerifyTokenReq\x1a .linkim.logic.v1.VerifyTokenResp\x12C\n" +
 	"\aSendMsg\x12\x1b.linkim.logic.v1.SendMsgReq\x1a\x1b.linkim.logic.v1.SendMsgAck\x12D\n" +
@@ -869,7 +927,7 @@ func file_logic_proto_rawDescGZIP() []byte {
 	return file_logic_proto_rawDescData
 }
 
-var file_logic_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_logic_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_logic_proto_goTypes = []any{
 	(*VerifyTokenReq)(nil),     // 0: linkim.logic.v1.VerifyTokenReq
 	(*VerifyTokenResp)(nil),    // 1: linkim.logic.v1.VerifyTokenResp
@@ -883,31 +941,33 @@ var file_logic_proto_goTypes = []any{
 	(*PendingReq)(nil),         // 9: linkim.logic.v1.PendingReq
 	(*PendingResp)(nil),        // 10: linkim.logic.v1.PendingResp
 	(*MarkReadReq)(nil),        // 11: linkim.logic.v1.MarkReadReq
-	(*ConvBrief)(nil),          // 12: linkim.pb.v1.ConvBrief
-	(*SyncPullReq)(nil),        // 13: linkim.pb.v1.SyncPullReq
+	(*Envelope)(nil),           // 12: linkim.logic.v1.Envelope
+	(*ConvBrief)(nil),          // 13: linkim.pb.v1.ConvBrief
+	(*SyncPullReq)(nil),        // 14: linkim.pb.v1.SyncPullReq
 }
 var file_logic_proto_depIdxs = []int32{
 	5,  // 0: linkim.logic.v1.SyncPullResp.messages:type_name -> linkim.logic.v1.PbMsg
-	12, // 1: linkim.logic.v1.PendingResp.convs:type_name -> linkim.pb.v1.ConvBrief
-	0,  // 2: linkim.logic.v1.Logic.VerifyToken:input_type -> linkim.logic.v1.VerifyTokenReq
-	2,  // 3: linkim.logic.v1.Logic.SendMsg:input_type -> linkim.logic.v1.SendMsgReq
-	13, // 4: linkim.logic.v1.Logic.SyncPull:input_type -> linkim.pb.v1.SyncPullReq
-	6,  // 5: linkim.logic.v1.Logic.ReportDelivered:input_type -> linkim.logic.v1.ReportDeliveredReq
-	7,  // 6: linkim.logic.v1.Logic.OnlineEvent:input_type -> linkim.logic.v1.OnlineEventReq
-	9,  // 7: linkim.logic.v1.Logic.GetPendingConvs:input_type -> linkim.logic.v1.PendingReq
-	11, // 8: linkim.logic.v1.Logic.MarkRead:input_type -> linkim.logic.v1.MarkReadReq
-	1,  // 9: linkim.logic.v1.Logic.VerifyToken:output_type -> linkim.logic.v1.VerifyTokenResp
-	3,  // 10: linkim.logic.v1.Logic.SendMsg:output_type -> linkim.logic.v1.SendMsgAck
-	4,  // 11: linkim.logic.v1.Logic.SyncPull:output_type -> linkim.logic.v1.SyncPullResp
-	8,  // 12: linkim.logic.v1.Logic.ReportDelivered:output_type -> linkim.logic.v1.Empty
-	10, // 13: linkim.logic.v1.Logic.OnlineEvent:output_type -> linkim.logic.v1.PendingResp
-	10, // 14: linkim.logic.v1.Logic.GetPendingConvs:output_type -> linkim.logic.v1.PendingResp
-	8,  // 15: linkim.logic.v1.Logic.MarkRead:output_type -> linkim.logic.v1.Empty
-	9,  // [9:16] is the sub-list for method output_type
-	2,  // [2:9] is the sub-list for method input_type
-	2,  // [2:2] is the sub-list for extension type_name
-	2,  // [2:2] is the sub-list for extension extendee
-	0,  // [0:2] is the sub-list for field type_name
+	13, // 1: linkim.logic.v1.PendingResp.convs:type_name -> linkim.pb.v1.ConvBrief
+	5,  // 2: linkim.logic.v1.Envelope.msg:type_name -> linkim.logic.v1.PbMsg
+	0,  // 3: linkim.logic.v1.Logic.VerifyToken:input_type -> linkim.logic.v1.VerifyTokenReq
+	2,  // 4: linkim.logic.v1.Logic.SendMsg:input_type -> linkim.logic.v1.SendMsgReq
+	14, // 5: linkim.logic.v1.Logic.SyncPull:input_type -> linkim.pb.v1.SyncPullReq
+	6,  // 6: linkim.logic.v1.Logic.ReportDelivered:input_type -> linkim.logic.v1.ReportDeliveredReq
+	7,  // 7: linkim.logic.v1.Logic.OnlineEvent:input_type -> linkim.logic.v1.OnlineEventReq
+	9,  // 8: linkim.logic.v1.Logic.GetPendingConvs:input_type -> linkim.logic.v1.PendingReq
+	11, // 9: linkim.logic.v1.Logic.MarkRead:input_type -> linkim.logic.v1.MarkReadReq
+	1,  // 10: linkim.logic.v1.Logic.VerifyToken:output_type -> linkim.logic.v1.VerifyTokenResp
+	3,  // 11: linkim.logic.v1.Logic.SendMsg:output_type -> linkim.logic.v1.SendMsgAck
+	4,  // 12: linkim.logic.v1.Logic.SyncPull:output_type -> linkim.logic.v1.SyncPullResp
+	8,  // 13: linkim.logic.v1.Logic.ReportDelivered:output_type -> linkim.logic.v1.Empty
+	10, // 14: linkim.logic.v1.Logic.OnlineEvent:output_type -> linkim.logic.v1.PendingResp
+	10, // 15: linkim.logic.v1.Logic.GetPendingConvs:output_type -> linkim.logic.v1.PendingResp
+	8,  // 16: linkim.logic.v1.Logic.MarkRead:output_type -> linkim.logic.v1.Empty
+	10, // [10:17] is the sub-list for method output_type
+	3,  // [3:10] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_logic_proto_init() }
@@ -922,7 +982,7 @@ func file_logic_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_logic_proto_rawDesc), len(file_logic_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

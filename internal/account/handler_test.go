@@ -25,7 +25,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *mockStore) {
 	require.NoError(t, err)
 	tm := NewTokenManager("test-secret", time.Hour, 24*time.Hour)
 	svc := NewService(store, cache, tm, ids)
-	srv := httptest.NewServer(NewHandler(svc, zap.NewNop()).Handler())
+	srv := httptest.NewServer(NewHandler(svc, nil, zap.NewNop()).Handler())
 	t.Cleanup(srv.Close)
 	return srv, store
 }
@@ -134,7 +134,7 @@ func TestRecoverMiddleware(t *testing.T) {
 	boom := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		panic("boom")
 	})
-	h := NewHandler(nil, zap.NewNop())
+	h := NewHandler(nil, nil, zap.NewNop())
 	srv := httptest.NewServer(h.recoverMiddleware(boom))
 	defer srv.Close()
 

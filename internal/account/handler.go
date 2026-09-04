@@ -15,12 +15,13 @@ const maxRequestBody = 1 << 20 // 1MB
 // Handler 是账号服务 HTTP 层。
 type Handler struct {
 	svc    *Service
+	groups *GroupService
 	logger *zap.Logger
 }
 
-// NewHandler 构造 HTTP handler。
-func NewHandler(svc *Service, logger *zap.Logger) *Handler {
-	return &Handler{svc: svc, logger: logger}
+// NewHandler 构造 HTTP handler（groups 可为 nil：不启用群管理端点）。
+func NewHandler(svc *Service, groups *GroupService, logger *zap.Logger) *Handler {
+	return &Handler{svc: svc, groups: groups, logger: logger}
 }
 
 // NewRouter 组装路由与中间件（access log + recover）。
@@ -29,6 +30,12 @@ func NewRouter(h *Handler) *http.ServeMux {
 	mux.HandleFunc("POST /api/v1/register", h.handleRegister)
 	mux.HandleFunc("POST /api/v1/login", h.handleLogin)
 	mux.HandleFunc("POST /internal/v1/verify", h.handleVerify)
+
+	// 群管理（S9）：JWT 鉴权后注入 uid。
+	mux.HandleFunc("POST /api/v1/groups", h.jwtAuth(h.handleCreateGroup))
+	mux.HandleFunc("GET /api/v1/groups/{gid}/members", h.jwtAuth(h.handleListMembers))
+	mux.HandleFunc("POST /api/v1/groups/{gid}/members", h.jwtAuth(h.handleAddMember))
+	mux.HandleFunc("DELETE /api/v1/groups/{gid}/members/{uid}", h.jwtAuth(h.handleRemoveMember))
 	return mux
 }
 

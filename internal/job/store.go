@@ -41,17 +41,24 @@ type Producer interface {
 type CommitFunc func(ctx context.Context, msgs []kafka.Message) error
 
 // StoreWorker 消费 msg.store：解析 PbMsg → 攒批 → INSERT IGNORE 落库 +
-// conversation UPSERT → 手动提交 offset（设计文档 6.1 ④环节）。
+// conversation UPSERT（单聊双方行 / 群聊全体成员行分批）→ 手动提交 offset。
 type StoreWorker struct {
-	exec     SQLExecer
-	producer Producer
-	commit   CommitFunc
-	logger   *zap.Logger
+	exec      SQLExecer
+	producer  Producer
+	commit    CommitFunc
+	memberSrc GroupMemberSource // 群会话 UPSERT 用成员列表
+	logger    *zap.Logger
+}
+
+// GroupMemberSource 群成员源（internal/service.GroupMembers 实现）。
+type GroupMemberSource interface {
+	Members(ctx context.Context, gid int64) ([]int64, error)
+	IsMember(ctx context.Context, gid, uid int64) (bool, error)
 }
 
 // NewStoreWorker 构造 store 消费者。
-func NewStoreWorker(exec SQLExecer, producer Producer, commit CommitFunc, logger *zap.Logger) *StoreWorker {
-	return &StoreWorker{exec: exec, producer: producer, commit: commit, logger: logger}
+func NewStoreWorker(exec SQLExecer, producer Producer, commit CommitFunc, memberSrc GroupMemberSource, logger *zap.Logger) *StoreWorker {
+	return &StoreWorker{exec: exec, producer: producer, commit: commit, memberSrc: memberSrc, logger: logger}
 }
 
 // storeItem 是一条待落库消息（含原始 Kafka 消息引用用于提交 offset）。
@@ -227,18 +234,28 @@ func BuildMessageInsert(table string, msgs []*pb.PbMsg) (string, []any, error) {
 	return sb.String(), args, nil
 }
 
-// upsertConversations 批量 UPSERT 会话双方行（发送方 unread+0，接收方+1）。
+// upsertConversations 批量 UPSERT 会话行：
+// 单聊双方各一行同批写入；群聊按成员分批（≤100/批）UPSERT 全体成员。
 func (w *StoreWorker) upsertConversations(ctx context.Context, items []storeItem) error {
-	var valid []*pb.PbMsg
+	var p2p []*pb.PbMsg
 	for _, it := range items {
-		if it.msg != nil {
-			valid = append(valid, it.msg)
+		if it.msg == nil {
+			continue
 		}
+		if it.msg.GetConvType() == 2 {
+			if err := w.upsertGroupConversations(ctx, it.msg); err != nil {
+				// 单个群的会话行失败不阻塞整批（消息本体已落库，靠重放/对账兜底）。
+				w.logger.Warn("group conversation upsert failed",
+					zap.String("conv", it.msg.GetConvId()), zap.Error(err))
+			}
+			continue
+		}
+		p2p = append(p2p, it.msg)
 	}
-	if len(valid) == 0 {
+	if len(p2p) == 0 {
 		return nil
 	}
-	query, args, err := BuildConversationUpsert(valid)
+	query, args, err := BuildConversationUpsert(p2p)
 	if err != nil {
 		// 数据问题不阻塞提交：跳过会话行更新（消息本体已落库）。
 		w.logger.Warn("build conversation upsert failed", zap.Error(err))
@@ -248,6 +265,76 @@ func (w *StoreWorker) upsertConversations(ctx context.Context, items []storeItem
 		return fmt.Errorf("job: upsert conversation: %w", err)
 	}
 	return nil
+}
+
+// upsertGroupConversations 为一条群消息 UPSERT 全体成员的会话行（分批 100/批）。
+func (w *StoreWorker) upsertGroupConversations(ctx context.Context, msg *pb.PbMsg) error {
+	gid, err := service.ParseGroupConv(msg.GetConvId())
+	if err != nil {
+		return err
+	}
+	if w.memberSrc == nil {
+		return fmt.Errorf("job: no member source configured")
+	}
+	members, err := w.memberSrc.Members(ctx, gid)
+	if err != nil {
+		return err
+	}
+	for _, stmt := range BuildGroupConversationUpserts(msg, members, groupConvBatch) {
+		if _, err := w.exec.ExecContext(ctx, stmt.query, stmt.args...); err != nil {
+			return fmt.Errorf("job: upsert group conversation: %w", err)
+		}
+	}
+	return nil
+}
+
+// groupConvBatch 群会话行每批上限。
+const groupConvBatch = 100
+
+// stmt 是一条待执行的批量语句。
+type stmt struct {
+	query string
+	args  []any
+}
+
+// BuildGroupConversationUpserts 生成群会话批量 UPSERT 语句（≤batch 成员/条）。
+// 发送者行 unread 增量 0，其余成员 +1；重进群的成员保留历史游标
+// （ON DUPLICATE 只推进 last_seq/unread，不重置 read_seq）。
+func BuildGroupConversationUpserts(msg *pb.PbMsg, members []int64, batch int) []stmt {
+	var out []stmt
+	updatedAt := time.UnixMilli(msg.GetTimestamp())
+	for start := 0; start < len(members); start += batch {
+		end := start + batch
+		if end > len(members) {
+			end = len(members)
+		}
+		var sb strings.Builder
+		sb.WriteString("INSERT INTO conversation (uid, conv_id, conv_type, target_id, last_seq, read_seq, unread, updated_at) VALUES ")
+		args := make([]any, 0, (end-start)*7)
+		for i, uid := range members[start:end] {
+			delta := int64(1)
+			if uid == msg.GetSenderId() {
+				delta = 0
+			}
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString("(?, ?, ?, ?, ?, 0, ?, ?)")
+			args = append(args, uid, msg.GetConvId(), msg.GetConvType(), gidOfConv(msg.GetConvId()), msg.GetSeq(), delta, updatedAt)
+		}
+		sb.WriteString(" ON DUPLICATE KEY UPDATE last_seq = GREATEST(last_seq, VALUES(last_seq)), unread = unread + VALUES(unread), updated_at = VALUES(updated_at)")
+		out = append(out, stmt{query: sb.String(), args: args})
+	}
+	return out
+}
+
+// gidOfConv 从群会话 ID 提取 gid（target_id）；失败返回 0。
+func gidOfConv(convID string) int64 {
+	gid, err := service.ParseGroupConv(convID)
+	if err != nil {
+		return 0
+	}
+	return gid
 }
 
 // BuildConversationUpsert 构造双方会话行的多值 UPSERT 语句。
