@@ -12,6 +12,7 @@ const (
 	tokenPrefix       = "token:"        // + uid        String，TTL 2h
 	convMembersPrefix = "conv:members:" // + gid        Set
 	friendPrefix      = "friend:"       // + uid        ZSet（score=updated_at）
+	deliveredPrefix   = "delivered:"    // + uid:msgId  String，TTL 24h（投递观测）
 )
 
 // RouteKey 返回 uid 的连接路由表键（Hash：field 为设备，value 为 comet gRPC 地址）。
@@ -39,3 +40,8 @@ func ConvMembersKey(gid int64) string { return convMembersPrefix + strconv.Forma
 
 // FriendKey 返回 uid 的好友列表缓存键（ZSet）。
 func FriendKey(uid int64) string { return friendPrefix + strconv.FormatInt(uid, 10) }
+
+// DeliveredKey 返回（uid, msgId）维度的已投递观测键，TTL 24h。
+func DeliveredKey(uid int64, msgID string) string {
+	return deliveredPrefix + strconv.FormatInt(uid, 10) + ":" + msgID
+}

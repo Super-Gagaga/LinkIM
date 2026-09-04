@@ -21,3 +21,10 @@ kafka:
 log:
   level: debug
   format: console
+
+consumer:
+  push_group: "job-push"
+  store_group: "job-store"
+  min_bytes: 1
+  max_bytes: 1048576
+  read_backoff_max: 2s

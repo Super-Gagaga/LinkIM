@@ -65,6 +65,7 @@ func main() {
 	defer heartbeat.Stop()
 
 	errCh := make(chan error, 1)
+	dedup := newLRU(1024) // 按 msg_id 去重（模拟真实客户端，网络重试可能重复推送）
 	go func() {
 		for {
 			mt, data, err := ws.ReadMessage()
@@ -80,6 +81,13 @@ func main() {
 			if err != nil {
 				fmt.Printf("[recv] 帧解析失败: %v\n", err)
 				continue
+			}
+			if frame.Cmd == protocol.CmdMsgPush {
+				var m pb.MsgPush
+				if proto.Unmarshal(frame.Body, &m) == nil && !dedup.add(m.GetMsgId()) {
+					fmt.Printf("[dup] %s msg_id=%s 已收到过，丢弃\n", protocol.CmdString(frame.Cmd), m.GetMsgId())
+					continue
+				}
 			}
 			describe(frame)
 		}
@@ -143,6 +151,32 @@ func randomID() string {
 		return fmt.Sprintf("cm-%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b[:])
+}
+
+// lru 是容量固定的简易去重窗口（环形 + map）。
+type lru struct {
+	cap  int
+	seen map[string]struct{}
+	ring []string
+	idx  int
+}
+
+func newLRU(capacity int) *lru {
+	return &lru{cap: capacity, seen: map[string]struct{}{}, ring: make([]string, capacity)}
+}
+
+// add 记录 id；返回 false 表示重复（已存在）。
+func (l *lru) add(id string) bool {
+	if _, ok := l.seen[id]; ok {
+		return false
+	}
+	if old := l.ring[l.idx]; old != "" {
+		delete(l.seen, old)
+	}
+	l.ring[l.idx] = id
+	l.seen[id] = struct{}{}
+	l.idx = (l.idx + 1) % l.cap
+	return true
 }
 
 // send 编码一帧并发送。

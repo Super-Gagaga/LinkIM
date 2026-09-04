@@ -1,4 +1,5 @@
-// Command job 启动 LinkIM Kafka 消费服务（见设计文档 S7）。
+// Command job 启动 LinkIM Kafka 消费服务（设计文档 8 节）：
+// job-push 消费 msg.push 投递给 comet；job-store 消费 msg.store 批量落库。
 package main
 
 import (
@@ -8,11 +9,17 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/segmentio/kafka-go"
 	"go.uber.org/zap"
 
+	"github.com/linkim/linkim/internal/job"
 	"github.com/linkim/linkim/pkg/conf"
+	"github.com/linkim/linkim/pkg/kafkax"
 	"github.com/linkim/linkim/pkg/logx"
+	"github.com/linkim/linkim/pkg/mysqlx"
+	"github.com/linkim/linkim/pkg/redisx"
 )
 
 // confPath 为配置文件路径，可通过 -conf 参数覆盖。
@@ -21,27 +28,87 @@ var confPath = flag.String("conf", "configs/job.yaml", "配置文件路径")
 func main() {
 	flag.Parse()
 
-	// 加载 YAML 配置（支持 LINKIM_ 前缀环境变量覆盖）。
 	cfg, err := conf.Load(*confPath)
 	if err != nil {
 		log.Fatalf("job: 加载配置失败: %v", err)
 	}
-	// 初始化全局 zap 日志器，进程退出前刷新缓冲。
 	logger, err := logx.New(cfg.Log)
 	if err != nil {
 		log.Fatalf("job: 初始化日志失败: %v", err)
 	}
 	defer func() { _ = logger.Sync() }()
 
-	logger.Info("service starting",
-		zap.String("service", cfg.Server.Name),
-		zap.Strings("kafka_brokers", cfg.Kafka.Brokers),
-	)
+	rdb := redisx.New(cfg.Redis)
+	if err := rdb.Ping(context.Background()).Err(); err != nil {
+		logger.Fatal("Redis 不可达", zap.Error(err))
+	}
+	defer func() { _ = rdb.Close() }()
 
-	// 监听 SIGINT/SIGTERM，收到退出信号后优雅退出。
+	db, err := mysqlx.New(cfg.MySQL)
+	if err != nil {
+		logger.Fatal("连接 MySQL 失败", zap.Error(err))
+	}
+	defer func() { _ = db.Close() }()
+
+	producer := kafkax.NewProducer(cfg.Kafka)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	<-ctx.Done()
 
-	logger.Info("shutdown signal received, exiting")
+	// job-push：在线投递。
+	pushReader := job.NewReader(cfg.Kafka.Brokers, cfg.Consumer.PushGroup,
+		"msg.push", cfg.Consumer.MinBytes, cfg.Consumer.MaxBytes,
+		cfg.Consumer.ReadBackoffMax)
+	pushWorker := job.NewPushWorker(rdb, job.NewCometPool(), logger)
+
+	// job-store：批量落库（DLQ 复用 producer）。
+	storeReader := job.NewReader(cfg.Kafka.Brokers, cfg.Consumer.StoreGroup,
+		"msg.store", cfg.Consumer.MinBytes, cfg.Consumer.MaxBytes,
+		cfg.Consumer.ReadBackoffMax)
+	commit := func(cctx context.Context, msgs []kafka.Message) error {
+		return storeReader.CommitMessages(cctx, msgs...)
+	}
+	storeWorker := job.NewStoreWorker(db, producer, commit, logger)
+	kmCh := make(chan kafka.Message, 256)
+
+	errCh := make(chan error, 3)
+	go func() {
+		logger.Info("push consumer starting", zap.String("group", cfg.Consumer.PushGroup))
+		errCh <- job.RunLoop(ctx, pushReader, pushWorker.Handle, logger)
+	}()
+	go func() {
+		logger.Info("store consumer starting", zap.String("group", cfg.Consumer.StoreGroup))
+		errCh <- job.StoreRunLoop(ctx, storeReader, kmCh, logger)
+	}()
+	go func() {
+		storeWorker.BatchLoop(ctx, kmCh)
+		errCh <- nil
+	}()
+
+	logger.Info("service starting", zap.String("service", cfg.Server.Name))
+
+	// 任一 worker 出错（非 ctx 取消）则整体退出。
+	select {
+	case <-ctx.Done():
+	case err := <-errCh:
+		if err != nil {
+			logger.Fatal("worker exited with error", zap.Error(err))
+		}
+	}
+
+	logger.Info("shutdown signal received, draining (10s)")
+	drainCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	<-drainCtx.Done() // 留时间给 BatchLoop 排空在途消息
+
+	if err := pushReader.Close(); err != nil {
+		logger.Error("关闭 push reader 失败", zap.Error(err))
+	}
+	if err := storeReader.Close(); err != nil {
+		logger.Error("关闭 store reader 失败", zap.Error(err))
+	}
+	if err := producer.Close(); err != nil {
+		logger.Error("关闭 producer 失败", zap.Error(err))
+	}
+	logger.Info("bye")
 }

@@ -218,10 +218,9 @@ func TestVerifyTokenRPC(t *testing.T) {
 		svc := newTestServer(newMemCache(), &stubVerifier{})
 		// SendMsg 自 S6 起已实现，不再断言其 Unimplemented。
 
-		_, err := svc.SyncPull(ctx, &pb.SyncPullReq{})
-		assert.Equal(t, codes.Unimplemented, status.Code(err))
+		// SendMsg（S6）与 ReportDelivered（S7）已实现。
 
-		_, err = svc.ReportDelivered(ctx, &pb.ReportDeliveredReq{})
+		_, err := svc.SyncPull(ctx, &pb.SyncPullReq{})
 		assert.Equal(t, codes.Unimplemented, status.Code(err))
 
 		_, err = svc.OnlineEvent(ctx, &pb.OnlineEventReq{})

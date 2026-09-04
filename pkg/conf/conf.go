@@ -68,16 +68,26 @@ type LogicConfig struct {
 	CallTimeout time.Duration `mapstructure:"call_timeout"`
 }
 
+// ConsumerConfig 定义 job 服务的 Kafka consumer 参数（设计文档 8.3）。
+type ConsumerConfig struct {
+	PushGroup      string        `mapstructure:"push_group"`  // msg.push 消费组
+	StoreGroup     string        `mapstructure:"store_group"` // msg.store 消费组
+	MinBytes       int           `mapstructure:"min_bytes"`
+	MaxBytes       int           `mapstructure:"max_bytes"`
+	ReadBackoffMax time.Duration `mapstructure:"read_backoff_max"`
+}
+
 // Config 是单个 LinkIM 服务的完整配置。
 type Config struct {
-	Server  ServerConfig  `mapstructure:"server"`
-	MySQL   MySQLConfig   `mapstructure:"mysql"`
-	Redis   RedisConfig   `mapstructure:"redis"`
-	Kafka   KafkaConfig   `mapstructure:"kafka"`
-	Log     LogConfig     `mapstructure:"log"`
-	JWT     JWTConfig     `mapstructure:"jwt"`
-	Account AccountConfig `mapstructure:"account"`
-	Logic   LogicConfig   `mapstructure:"logic"`
+	Server   ServerConfig   `mapstructure:"server"`
+	MySQL    MySQLConfig    `mapstructure:"mysql"`
+	Redis    RedisConfig    `mapstructure:"redis"`
+	Kafka    KafkaConfig    `mapstructure:"kafka"`
+	Log      LogConfig      `mapstructure:"log"`
+	JWT      JWTConfig      `mapstructure:"jwt"`
+	Account  AccountConfig  `mapstructure:"account"`
+	Logic    LogicConfig    `mapstructure:"logic"`
+	Consumer ConsumerConfig `mapstructure:"consumer"`
 }
 
 // EnvPrefix 是用于覆盖文件配置值的环境变量前缀，
@@ -145,4 +155,10 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("logic.addr", "127.0.0.1:9001")
 	v.SetDefault("logic.call_timeout", 2*time.Second)
+
+	v.SetDefault("consumer.push_group", "job-push")
+	v.SetDefault("consumer.store_group", "job-store")
+	v.SetDefault("consumer.min_bytes", 1)
+	v.SetDefault("consumer.max_bytes", 1<<20)
+	v.SetDefault("consumer.read_backoff_max", 2*time.Second)
 }
