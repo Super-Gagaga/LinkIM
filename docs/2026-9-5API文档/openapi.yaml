@@ -1,0 +1,586 @@
+# LinkIM account 服务 HTTP API 规范（OpenAPI 3.0.3）
+# 依据 internal/account/handler.go、service.go、group.go 实际实现编写。
+# 在线预览：把本文件粘贴到 https://editor.swagger.io ，或
+#   npx @redocly/cli preview-docs docs/openapi.yaml
+openapi: 3.0.3
+info:
+  title: LinkIM Account API
+  description: |
+    LinkIM 账号服务：注册、登录、JWT 双 token 签发、内部 token 校验、群管理。
+
+    ## 统一响应包装
+    所有接口返回 `{code, msg, data?}` 信封；`code = 0` 表示成功，
+    非 0 为业务错误码（分段：401xx 鉴权 / 402xx 参数 / 403xx 关系权限 / 501xx 存储 / 502xx 中间件）。
+
+    ## 业务错误码 → HTTP 状态映射
+    | 业务码 | 含义 | HTTP |
+    | --- | --- | --- |
+    | 0 | 成功 | 200 |
+    | 40101 | 鉴权失败（密码错误 / token 无效、过期、被顶替） | 401 |
+    | 40201 | 请求参数格式错误 | 400 |
+    | 40202 | 用户名已被注册 | 400 |
+    | 40203 | 群名非法（长度须 1~64） | 400 |
+    | 40204 | 群不存在 | 404 |
+    | 40302 | 无权限操作（非管理员/非本人） | 403 |
+    | 40303 | 群成员超过上限 500 | 400 |
+    | 50101 | 数据库存储错误 | 500 |
+    | 50201 | Redis 中间件错误 | 503 |
+  version: 1.0.0
+servers:
+  - url: http://127.0.0.1:8080
+    description: 本地手动启动（make compose-up + bin/account.exe）
+  - url: http://127.0.0.1:18080
+    description: docker 一键全链路（make run-all）
+tags:
+  - name: 账号
+  - name: 内部接口
+  - name: 群管理
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: '登录返回的 access_token，请求头 `Authorization: Bearer <access_token>`'
+  parameters:
+    GIDParam:
+      in: path
+      name: gid
+      required: true
+      description: 群 ID（snowflake 雪花 ID）
+      schema:
+        type: integer
+        format: int64
+        example: 7345000000000002001
+    UIDPathParam:
+      in: path
+      name: uid
+      required: true
+      description: 目标成员的用户 UID
+      schema:
+        type: integer
+        format: int64
+        example: 7345000000000001002
+  schemas:
+    # ---- 请求体 ----
+    RegisterRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          description: 4~32 个字符，仅允许字母、数字与下划线（^[a-zA-Z0-9_]+$）
+          pattern: '^[a-zA-Z0-9_]+$'
+          minLength: 4
+          maxLength: 32
+          example: alice
+        password:
+          type: string
+          description: 8~64 个字符
+          format: password
+          minLength: 8
+          maxLength: 64
+          example: pass1234
+        nickname:
+          type: string
+          description: 昵称，最长 64 个字符，可为空
+          maxLength: 64
+          example: Alice
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: alice
+        password:
+          type: string
+          format: password
+          example: pass1234
+    VerifyRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: 待校验的 access token
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhaWQiOiJhY2Nlc3MiLCJ1aWQiOjczNDUwMDAwMDAwMDAwMTAwMSwiZXhwIjoxNzg3NjUzMjAwfQ.sig-placeholder
+    CreateGroupRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: 群名，去首尾空格后长度须为 1~64
+          minLength: 1
+          maxLength: 64
+          example: 项目交流群
+        member_uids:
+          type: array
+          description: 初始成员 UID 列表；服务端自动去重并排除创建者本人；总数（含群主）上限 500
+          items:
+            type: integer
+            format: int64
+          example: [7345000000000001002, 7345000000000001003]
+    AddMemberRequest:
+      type: object
+      required: [uid]
+      properties:
+        uid:
+          type: integer
+          format: int64
+          description: 要拉入群的成员 UID（须 > 0）；已在该群则幂等忽略
+          example: 7345000000000001004
+    # ---- 响应 ----
+    Envelope:
+      type: object
+      description: 统一响应信封
+      required: [code, msg]
+      properties:
+        code:
+          type: integer
+          description: 业务码，0 = 成功
+          example: 0
+        msg:
+          type: string
+          example: ok
+        data:
+          description: 业务数据，失败时通常省略
+    UidData:
+      type: object
+      properties:
+        uid:
+          type: integer
+          format: int64
+          description: 雪花算法生成的用户 UID
+          example: 7345000000000001001
+    LoginResult:
+      type: object
+      properties:
+        uid:
+          type: integer
+          format: int64
+          example: 7345000000000001001
+        access_token:
+          type: string
+          description: 访问令牌，默认 2h 有效（jwt.access_ttl）
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhaWQiOiJhY2Nlc3MiLCJ1aWQiOjczNDUwMDAwMDAwMDAwMTAwMSwiZXhwIjoxNzg3NjUzMjAwfQ.sig-access
+        refresh_token:
+          type: string
+          description: 刷新令牌，默认 30d 有效（jwt.refresh_ttl = 720h）
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhaWQiOiJyZWZyZXNoIiwidWlkIjo3MzQ1MDAwMDAwMDAwMDEwMDEsImV4cCI6MTgwMzIwNTYwMH0.sig-refresh
+        expire_at:
+          type: integer
+          format: int64
+          description: access token 过期时间（Unix 秒）
+          example: 1787653200
+    VerifyResult:
+      type: object
+      properties:
+        uid:
+          type: integer
+          format: int64
+          description: token 对应的 UID；校验失败时为 0
+          example: 7345000000000001001
+        valid:
+          type: boolean
+          description: token 是否有效
+          example: true
+    GidData:
+      type: object
+      properties:
+        gid:
+          type: integer
+          format: int64
+          description: 雪花算法生成的群 ID，创建者即群主（role=2）
+          example: 7345000000000002001
+    GroupMember:
+      type: object
+      properties:
+        uid:
+          type: integer
+          format: int64
+          example: 7345000000000001001
+        role:
+          type: integer
+          description: 角色：0 普通成员 / 1 管理员 / 2 群主
+          enum: [0, 1, 2]
+          example: 2
+        join_at:
+          type: string
+          format: date-time
+          example: '2026-09-05T01:20:30+08:00'
+    MemberListData:
+      type: object
+      properties:
+        members:
+          type: array
+          description: 按 uid 升序
+          items:
+            $ref: '#/components/schemas/GroupMember'
+  responses:
+    BadRequest:
+      description: 参数错误（业务码 402xx）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Envelope'
+          examples:
+            badJSON:
+              summary: 请求体不是合法 JSON
+              value: {code: 40201, msg: 请求体不是合法 JSON}
+            badParam:
+              summary: 字段校验失败（以注册为例）
+              value: {code: 40201, msg: 用户名长度须为 4~32 个字符}
+    Unauthorized:
+      description: 鉴权失败（业务码 401xx）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Envelope'
+          examples:
+            noToken:
+              summary: 缺少 Bearer token
+              value: {code: 40101, msg: 缺少 Bearer token}
+            badToken:
+              summary: token 无效或过期
+              value: {code: 40101, msg: token 无效或已过期}
+            revokedToken:
+              summary: token 被新登录顶替/已失效
+              value: {code: 40101, msg: token 已失效}
+    Forbidden:
+      description: 无权限（业务码 403xx）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Envelope'
+          examples:
+            forbidden:
+              value: {code: 40302, msg: 仅管理员可拉人}
+    NotFound:
+      description: 资源不存在（业务码 40204）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Envelope'
+          examples:
+            groupNotFound:
+              value: {code: 40204, msg: 群不存在}
+    StorageError:
+      description: 服务内部错误（业务码 50101）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Envelope'
+          examples:
+            storage:
+              value: {code: 50101, msg: 服务暂时不可用}
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/register:
+    post:
+      tags: [账号]
+      summary: 注册
+      description: 校验参数后以 bcrypt(cost=10) 哈希口令并落库，返回雪花 UID。并发重名由唯一索引兜底。
+      security: [] # 无需鉴权
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            examples:
+              normal:
+                summary: 正常注册
+                value: {username: alice, password: pass1234, nickname: Alice}
+      responses:
+        '200':
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UidData'
+              example: {code: 0, msg: ok, data: {uid: 7345000000000001001}}
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/StorageError'
+
+  /api/v1/login:
+    post:
+      tags: [账号]
+      summary: 登录
+      description: |
+        校验口令并签发 access/refresh 双 token，同时把 access token 摘要写入 Redis。
+        同一用户新登录会覆盖旧摘要，旧 access token 立即失效（单端顶替）。
+        为防账号枚举，「用户不存在」与「密码错误」统一返回 40101。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              normal:
+                summary: 正常登录
+                value: {username: alice, password: pass1234}
+      responses:
+        '200':
+          description: 登录成功，返回双 token
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/LoginResult'
+              example:
+                code: 0
+                msg: ok
+                data:
+                  uid: 7345000000000001001
+                  access_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhaWQiOiJhY2Nlc3MiLCJ1aWQiOjczNDUwMDAwMDAwMDAwMTAwMSwiZXhwIjoxNzg3NjUzMjAwfQ.sig-access
+                  refresh_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhaWQiOiJyZWZyZXNoIiwidWlkIjo3MzQ1MDAwMDAwMDAwMDEwMDEsImV4cCI6MTgwMzIwNTYwMH0.sig-refresh
+                  expire_at: 1787653200
+        '400':
+          description: 用户名或密码为空
+          content:
+            application/json:
+              example: {code: 40201, msg: 用户名或密码不能为空}
+        '401':
+          description: 用户名或密码错误（不区分两种情况）
+          content:
+            application/json:
+              example: {code: 40101, msg: 用户名或密码错误}
+        '503':
+          description: Redis 中间件错误
+          content:
+            application/json:
+              example: {code: 50201, msg: 服务暂时不可用}
+
+  /internal/v1/verify:
+    post:
+      tags: [内部接口]
+      summary: 内部 token 校验
+      description: |
+        供 logic / comet 等内部服务调用。校验失败仍返回 HTTP 200，
+        以 `code=40101` + `data.valid=false` 表达，便于调用方按 body 判断。
+        校验链：签名/过期 → token 类型须为 access → Redis 摘要比对。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRequest'
+            examples:
+              normal:
+                summary: 校验有效 token
+                value: {token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhaWQiOiJhY2Nlc3MiLCJ1aWQiOjczNDUwMDAwMDAwMDAwMTAwMSwiZXhwIjoxNzg3NjUzMjAwfQ.sig-access}
+      responses:
+        '200':
+          description: 校验结果（无论 token 是否有效都是 HTTP 200）
+          content:
+            application/json:
+              examples:
+                valid:
+                  summary: token 有效
+                  value: {code: 0, msg: ok, data: {uid: 7345000000000001001, valid: true}}
+                invalid:
+                  summary: token 无效/过期/被顶替
+                  value: {code: 40101, msg: token 无效或已过期, data: {uid: 0, valid: false}}
+                refreshTypeRejected:
+                  summary: 误用 refresh token（类型不符）
+                  value: {code: 40101, msg: token 无效或已过期, data: {uid: 0, valid: false}}
+        '503':
+          description: Redis 中间件错误
+          content:
+            application/json:
+              example: {code: 50201, msg: 服务暂时不可用}
+
+  /api/v1/groups:
+    post:
+      tags: [群管理]
+      summary: 建群
+      description: |
+        创建群，创建者即群主（role=2）。member_uids 自动去重并排除创建者本人；
+        成员总数（含群主）超过 500 返回 40303。每个初始成员会产生一条 join 群事件。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGroupRequest'
+            examples:
+              normal:
+                summary: 建一个三人群（自己 + bob + carol）
+                value: {name: 项目交流群, member_uids: [7345000000000001002, 7345000000000001003]}
+      responses:
+        '200':
+          description: 建群成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GidData'
+              example: {code: 0, msg: ok, data: {gid: 7345000000000002001}}
+        '400':
+          description: 群名非法 / 群满 / JSON 非法
+          content:
+            application/json:
+              examples:
+                nameBad:
+                  summary: 群名超长或为空
+                  value: {code: 40203, msg: 群名长度须为 1~64}
+                groupFull:
+                  summary: 超过 500 人上限
+                  value: {code: 40303, msg: 群成员超过上限 500}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/StorageError'
+
+  /api/v1/groups/{gid}/members:
+    get:
+      tags: [群管理]
+      summary: 群成员列表
+      description: 返回全部成员（含角色与入群时间），按 uid 升序。任意登录用户可查。
+      parameters:
+        - $ref: '#/components/parameters/GIDParam'
+      responses:
+        '200':
+          description: 成员列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MemberListData'
+              example:
+                code: 0
+                msg: ok
+                data:
+                  members:
+                    - uid: 7345000000000001001
+                      role: 2
+                      join_at: '2026-09-05T01:20:30+08:00'
+                    - uid: 7345000000000001002
+                      role: 0
+                      join_at: '2026-09-05T01:20:30+08:00'
+        '400':
+          description: 路径参数非法（gid 非数字或 ≤ 0）
+          content:
+            application/json:
+              example: {code: 40201, msg: 路径参数非法}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/StorageError'
+    post:
+      tags: [群管理]
+      summary: 添加成员
+      description: 仅管理员（role≥1）可拉人；uid 非法或已在群时幂等忽略；成功后对该成员发 join 事件。
+      parameters:
+        - $ref: '#/components/parameters/GIDParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddMemberRequest'
+            examples:
+              normal:
+                summary: 把 dave 拉进群
+                value: {uid: 7345000000000001004}
+      responses:
+        '200':
+          description: 添加成功（已存在也返回成功，幂等）
+          content:
+            application/json:
+              example: {code: 0, msg: ok}
+        '400':
+          description: uid 非法（≤0 或缺失）
+          content:
+            application/json:
+              example: {code: 40201, msg: uid 非法}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: 操作者不是管理员
+          content:
+            application/json:
+              example: {code: 40302, msg: 仅管理员可拉人}
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/StorageError'
+
+  /api/v1/groups/{gid}/members/{uid}:
+    delete:
+      tags: [群管理]
+      summary: 移除成员 / 退群
+      description: |
+        管理员以上可移除他人（事件 leave）；成员本人可退出（事件 quit）。
+        普通成员移除他人返回 40302。
+      parameters:
+        - $ref: '#/components/parameters/GIDParam'
+        - $ref: '#/components/parameters/UIDPathParam'
+      responses:
+        '200':
+          description: 移除/退群成功（移除不存在成员同样成功）
+          content:
+            application/json:
+              example: {code: 0, msg: ok}
+        '400':
+          description: 路径参数非法
+          content:
+            application/json:
+              example: {code: 40201, msg: 路径参数非法}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: 普通成员尝试移除他人
+          content:
+            application/json:
+              example: {code: 40302, msg: 仅管理员可移除成员}
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/StorageError'
+
+  /metrics:
+    get:
+      tags: [内部接口]
+      summary: Prometheus 指标
+      security: []
+      responses:
+        '200':
+          description: Prometheus 文本格式指标
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  # HELP http_requests_total ...
+                  linkim_account_http_requests_total{path="/api/v1/login",status="200"} 42
